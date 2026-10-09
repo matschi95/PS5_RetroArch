@@ -259,6 +259,36 @@ backend (`src/remote/source.h`), and several servers can be set up at once.
   is deleted and the download fails saying so; trying again downloads it again. A file
   the server knows no CRC32 of is taken by its size.
 
+### Save sync
+
+Your saves and save states can be kept on the server too, so that a game goes on where
+you left it on another console or device. It is set up apart from the games: another
+server, or another user of the same one, works as well. RomM 5.0 or newer keeps them
+(as RomM keeps RetroArch's: the save in the slot *autosave* of the core, the save states
+by their file names); each kind of server is a backend (`src/remote/save_store.h`).
+
+- **Set up:** the title writes `config/remote/save-sync.json`; fill in the server over
+  FTP:
+  ```json
+  { "version": 1, "auto": true, "states": true,
+    "type": "romm", "url": "http://192.168.1.20:3000", "token": "rmm_..." }
+  ```
+  The token needs the scopes *platforms.read*, *roms.read*, *assets.read/write* and
+  *devices.read/write*. `"states": false` keeps the save states on the console,
+  `"auto": false` turns the sync off.
+- **Before a game:** its save data is synced as it loads, before RetroArch reads the
+  save. Started from RetroArch's menu, nothing is asked: what cannot be done then (the
+  server does not answer, both sides changed) is left as it is and a notice says so.
+  Started from a server game's entry, a dialog shows it, asks which one stays when both
+  sides changed, and offers **Play anyway**, **Try again** or **Back** when the server
+  cannot be reached.
+- **After a game:** its save data goes up in the background with a notice, and is tried
+  again at later starts until it worked.
+- **Nothing lost:** which side changed is told by the files' contents, not by the times
+  (the console keeps what each was when they were last the same), so a save changed on
+  both sides is never replaced unasked. A file replaced on the console goes to
+  `config/remote/save-sync/backups/` first; the last three of each are kept.
+
 <a id="your-files"></a>
 
 ## <img src="assets/readme/starfield-section.svg" width="960" alt=""><br><img src="webui/assets/fluent/document-folder.svg" width="26" height="26" alt=""> Your files
@@ -277,7 +307,7 @@ usually `/data/homebrew/PPSA99169/`.
 | `cores/` and `info/` | Native cores and their metadata |
 | `config/retroarch.cfg` | Live RetroArch configuration |
 | `config/webui.cfg` | Saved global WebUI preferences |
-| `config/remote/` | Your game servers (`sources.json`), their game lists and the download queue |
+| `config/remote/` | Your game servers (`sources.json`), their game lists and the download queue; the save sync (`save-sync.json`, and in `save-sync/` what it keeps and the backups) |
 | `content/<system>/.remote/` | Entries of server games not yet downloaded |
 | `config/<core>/` | Core options and RetroArch overrides, per core and per game |
 | `config/remaps/<core>/` | Controller remaps, per core and per game |

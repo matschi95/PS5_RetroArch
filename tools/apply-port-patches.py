@@ -3718,6 +3718,22 @@ EDITS += [
     ('menu/cbs/menu_cbs_ok.c', '   BIND_ACTION_OK(cbs, action_ok_lookup_setting);\n\n   if (menu_cbs_init_bind_ok_compare_label(cbs, label) == 0)', '   /* patches/series, 0116: WebUI entry action */\n   if (string_is_equal(label, "ps5_webui"))\n   {\n      BIND_ACTION_OK(cbs, action_ok_ps5_webui);\n      return 0;\n   }\n   BIND_ACTION_OK(cbs, action_ok_lookup_setting);\n\n   if (menu_cbs_init_bind_ok_compare_label(cbs, label) == 0)', 'patches/series, 0116: WebUI entry action'),
 ]
 
+# The save sync before a game (patches/series, 0117): its save data synced as its content loads,
+# before RetroArch reads the save file and the automatic save state (src/remote/remote_ps5.cpp).
+EDITS += [
+    ('runloop.c',
+     '   runloop_path_init_savefile(runloop_st);\n\n   if (!event_load_save_files(runloop_st->flags & RUNLOOP_FLAG_IS_SRAM_LOAD_DISABLED))',
+     '   runloop_path_init_savefile(runloop_st);\n\n'
+     '   /* patches/series, 0117: the save sync before a game, as its save file is read. */\n'
+     '   {\n'
+     '      extern void ps5_save_sync_before(const char *, const char *, const char *, const char *);\n'
+     '      ps5_save_sync_before(path_get(RARCH_PATH_CONTENT), path_get(RARCH_PATH_CORE),\n'
+     '            runloop_st->name.savefile, runloop_st->name.savestate);\n'
+     '   }\n\n'
+     '   if (!event_load_save_files(runloop_st->flags & RUNLOOP_FLAG_IS_SRAM_LOAD_DISABLED))',
+     'patches/series, 0117: the save sync before a game'),
+]
+
 # Changes that are withdrawn rather than deleted, by marker.
 #
 # An entry here names an insertion this driver no longer needs, and the

@@ -44,7 +44,7 @@ def main():
         subprocess.run(['cc', '-std=c11', '-O2', '-c', 'src/ps5_library.c', '-o', library], cwd=ROOT, check=True)
         binary = str(Path(td) / 'remote-ui-test')
         subprocess.run(['c++', '-std=c++20', '-O2', '-fno-exceptions', '-fno-rtti', '-pthread', '-Isrc',
-                        '-I' + str(RETROARCH), 'tests/remote_ui_test.cpp', *SOURCES, library, '-o', binary],
+                        '-I' + str(RETROARCH), 'tests/remote_ui_test.cpp', *SOURCES, library, '-lz', '-o', binary],
                        cwd=ROOT, check=True)
         subprocess.run([binary, td], cwd=ROOT, check=True)
         for frame in sorted(Path(td).glob('*.rgb')):

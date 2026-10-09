@@ -11,6 +11,7 @@
 #pragma once
 
 #include "../remote.h"
+#include "../save_jobs.h"
 
 #include <string>
 #include <vector>
@@ -35,6 +36,16 @@ class Services
      * not happen, with why. */
     virtual std::string play(const Game &game, const std::string &launch,
                              const std::string &core) = 0;
+    /* The save sync before a game starts from here (src/remote/save_jobs.h): whether its save
+     * data syncs first (a server is set, and the game was played on the console before),
+     * the sync on its thread, where it is, the player's choice in a conflict, stopping it,
+     * and done with it. */
+    virtual bool sync_wanted(const std::string &launch) = 0;
+    virtual void sync_start(const std::string &launch) = 0;
+    virtual SyncView sync_view() = 0;
+    virtual void sync_choose(SyncChoice choice) = 0;
+    virtual void sync_stop() = 0;
+    virtual void sync_end() = 0;
     /* Seconds, for how long a message stands. */
     virtual double now() = 0;
 };

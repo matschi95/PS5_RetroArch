@@ -6,13 +6,16 @@
 #include "../src/remote/backends.h"
 #include "../src/remote/files.h"
 #include "../src/remote/romm/romm_saves.h"
+#include "../src/remote/save_jobs.h"
 #include "../src/remote/save_config.h"
 #include "../src/remote/save_sync.h"
 
 #include <cassert>
 #include <cstdio>
 #include <map>
+#include <chrono>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace remote = ps5::remote;
@@ -33,6 +36,7 @@ struct Server
     std::map<std::string, Copy> copies;
     bool states_hashed = false; /* RomM keeps no hash of a state */
     bool refuse_newer = false;  /* an upload without overwrite is refused (409) */
+    bool down = false;          /* it does not answer */
     int uploads = 0, downloads = 0, versions = 0;
     std::string last_user = "alex";
 
@@ -61,9 +65,11 @@ class FakeStore final : public remote::SaveStore
     {
         return "http://fake";
     }
-    bool prepare(const remote::Stopped &, std::string *) override
+    bool prepare(const remote::Stopped &, std::string *error) override
     {
-        return true;
+        if (server.down)
+            *error = "The server did not answer";
+        return !server.down;
     }
     std::string user() const override
     {
@@ -356,7 +362,83 @@ int main(int argc, char **argv)
     game.platform = "nes";
     assert(sync_now().outcome == remote::SyncOutcome::no_game);
 
+    /* When it runs (save_jobs.h): before a game from RetroArch's menu, without asking; not
+     * for a game the remote core synced just now; after a game, waiting in pending.json until
+     * it worked; not at all with "auto" off. */
+    {
+        game.platform = "snes";
+        game.name = "Chrono Trigger";
+        game.content = root + "/content/SNES/Chrono Trigger (USA).sfc";
+        game.crc32 = "deadbeef";
+        const std::string folder = root + "/jobs/config/remote";
+        write(folder + "/save-sync.json", "{\"type\":\"fake\",\"states\":false}");
+        remote::SaveJobs jobs(folder);
+        std::vector<std::string> notices;
+        jobs.on_notice([&](const std::string &text) { notices.push_back(text); });
+        assert(jobs.wanted());
+        remote::SyncGame known;
+        assert(!jobs.known(game.content, &known));
+        put(remote::SaveKind::save, "Chrono Trigger (USA).srm", "from the server");
+        files::remove_tree(game.save);
+        remote::SyncResult before = jobs.sync_before(game, 10);
+        assert(before.outcome == remote::SyncOutcome::downloaded &&
+               read(game.save) == "from the server");
+        assert(!notices.empty() && notices.back() == "Chrono Trigger: save data from the server");
+        assert(jobs.known(game.content, &known) && known.save == game.save &&
+               known.emulator == "snes9x");
+        /* Both changed: left as it is, unasked, and said. */
+        write(game.save, "played here");
+        put(remote::SaveKind::save, "Chrono Trigger (USA).srm", "played there");
+        before = jobs.sync_before(game, 10);
+        assert(before.outcome == remote::SyncOutcome::kept && read(game.save) == "played here");
+        assert(notices.back().find("left as it is") != std::string::npos);
+        /* Synced by the remote core, asking: the hook leaves it alone, once. */
+        const int uploads = server.uploads;
+        jobs.synced_launch(game.content);
+        assert(jobs.sync_before(game, 10).outcome == remote::SyncOutcome::same &&
+               files::size(folder + "/save-sync/launched") < 0);
+        /* After the game: up on the thread; with the server not answering, it waits for later. */
+        server.down = true;
+        jobs.played(game);
+        jobs.wait();
+        assert(jobs.pending().size() == 1 && jobs.view().stage == remote::SyncView::failed);
+        jobs.end();
+        server.down = false;
+        jobs.resume_pending();
+        jobs.wait();
+        /* Both changed: after a game nobody is asked; left as it is, done with. */
+        assert(jobs.view().outcome == remote::SyncOutcome::kept && jobs.pending().empty() &&
+               read(game.save) == "played here");
+        /* A conflict on the thread, the player asked. */
+        write(game.save, "played here again");
+        std::thread chooser(
+            [&]
+            {
+                while (jobs.view().stage != remote::SyncView::conflict)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                assert(jobs.view().file == "Chrono Trigger (USA).srm");
+                jobs.choose(remote::SyncChoice::console);
+            });
+        assert(jobs.start({game}, true));
+        chooser.join();
+        jobs.wait();
+        assert(jobs.view().outcome == remote::SyncOutcome::uploaded && server.uploads > uploads &&
+               server.copies["save/snes9x/Chrono Trigger (USA).srm"].data == "played here again");
+        /* "auto" off: nothing at all. */
+        write(folder + "/save-sync.json", "{\"type\":\"fake\",\"states\":false,\"auto\":false}");
+        assert(!jobs.wanted());
+        write(game.save, "off");
+        assert(jobs.sync_before(game, 10).outcome == remote::SyncOutcome::same);
+        jobs.played(game);
+        assert(jobs.pending().empty());
+        /* pending.json as it is written. */
+        const remote::SyncGame back = remote::SaveJobs::from_json(remote::SaveJobs::to_json(game));
+        assert(back.content == game.content && back.state == game.state &&
+               back.crc32 == game.crc32 && back.platform == game.platform);
+    }
+
     std::puts("save sync: the parts, save-sync.json, uploads, downloads, conflicts and choices, no "
-              "record, backups, save states, games the server does not have PASS");
+              "record, backups, save states, games the server does not have, before and after a "
+              "game PASS");
     return 0;
 }

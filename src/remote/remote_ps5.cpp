@@ -11,6 +11,11 @@
  * (ps5_remote_core_opening, from src/core_loader_ps5.cpp), the remote core's does not.
  * Downloads are written by the console's FTP server (ftpsrv, etaHEN's...), through the
  * platform's offload streams (ps5platform/offload.h): they need one.
+ *
+ * The save sync (src/remote/save_jobs.h): RetroArch's hook as a game's content loads
+ * (ps5_save_sync_before, patches/series 0117) syncs its save data first, and once its core
+ * closed again it goes up (ps5_remote_core_closed); what waits from an earlier start goes
+ * on as RetroArch starts (ps5_remote_start). Notices are RetroArch's on-screen messages.
  */
 #include "remote_core.h"
 
@@ -20,6 +25,8 @@
 #include "files.h"
 #include "library.h"
 #include "remote.h"
+#include "save_config.h"
+#include "save_jobs.h"
 #include "ui/remote_ui.h"
 
 #include <chrono>
@@ -29,11 +36,20 @@
 #include <memory>
 #include <mutex>
 #include <ps5platform/offload.h>
+#include <queues/message_queue.h>
 #include <unistd.h>
+
+extern "C" void runloop_msg_queue_push(const char *msg, size_t len, unsigned prio,
+                                       unsigned duration, bool flush, char *title,
+                                       enum message_queue_icon icon,
+                                       enum message_queue_category category);
 
 namespace
 {
 using namespace ps5::remote;
+
+/* The most a game waits for its save data before it starts. */
+constexpr unsigned sync_timeout = 15;
 
 /* How long the start waits for a new source's answers. */
 constexpr unsigned start_timeout = 5;
@@ -107,6 +123,8 @@ Paths title_paths()
     return paths;
 }
 
+SaveJobs &save_jobs();
+
 /* The title's services for the remote core's screens. */
 class TitleServices final : public ui::Services
 {
@@ -165,17 +183,119 @@ class TitleServices final : public ui::Services
         }
         else
             std::snprintf(request.frontend, sizeof request.frontend, "%s", PS5_GAME_EBOOT);
+        /* Its save data synced here, asking: RetroArch's hook leaves it alone. */
+        if (syncing_.content == launch)
+            save_jobs().synced_launch(launch);
         /* The game goes into its system's playlist at this restart (src/remote/library.h),
          * which associates it with the platform's core. */
         ps5_game_launch(&request);
         return request.error;
+    }
+    bool sync_wanted(const std::string &launch) override
+    {
+        SyncGame game;
+        return save_jobs().wanted() && save_jobs().known(launch, &game);
+    }
+    void sync_start(const std::string &launch) override
+    {
+        if (!save_jobs().known(launch, &syncing_))
+            syncing_ = SyncGame();
+        waiting_ = true;
+        sync_view();
+    }
+    SyncView sync_view() override
+    {
+        /* Another sync under way (a game's after it ended): this one once it is done. */
+        if (waiting_ && save_jobs().start({syncing_}, true))
+            waiting_ = false;
+        if (!waiting_)
+            return save_jobs().view();
+        SyncView view;
+        view.stage = SyncView::working;
+        view.before = true;
+        view.game = syncing_.name;
+        return view;
+    }
+    void sync_choose(SyncChoice choice) override
+    {
+        save_jobs().choose(choice);
+    }
+    void sync_stop() override
+    {
+        waiting_ = false;
+        syncing_ = SyncGame();
+        save_jobs().stop();
+    }
+    void sync_end() override
+    {
+        save_jobs().end();
     }
     double now() override
     {
         return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
             .count();
     }
+
+  private:
+    SyncGame syncing_;     /* the game whose save data syncs before it starts from here */
+    bool waiting_ = false; /* its sync is still to start */
 };
+
+/* The save sync's jobs: they live as long as the process (their thread uses them). */
+SaveJobs &save_jobs()
+{
+    static SaveJobs *jobs = []
+    {
+        SaveJobs *made = new SaveJobs(Paths::title().config);
+        made->on_notice(
+            [](const std::string &text)
+            {
+                runloop_msg_queue_push(text.c_str(), text.size(), 1, 300, false, nullptr,
+                                       MESSAGE_QUEUE_ICON_DEFAULT,
+                                       text.find("not synced") != std::string::npos ||
+                                               text.find("too old") != std::string::npos
+                                           ? MESSAGE_QUEUE_CATEGORY_WARNING
+                                           : MESSAGE_QUEUE_CATEGORY_INFO);
+            });
+        return made;
+    }();
+    return *jobs;
+}
+
+/* A game as the save sync takes it: its name, platform and checksum from its playlist. */
+SyncGame sync_game_of(const char *content, const char *core, const char *savefile,
+                      const char *savestate)
+{
+    SyncGame game;
+    game.content = content;
+    game.emulator = emulator_of(core);
+    game.save = savefile ? savefile : "";
+    game.state = savestate ? savestate : "";
+    game.name = files::base_name(game.content);
+    if (const size_t dot = game.name.rfind('.'); dot != std::string::npos && dot > 0)
+        game.name.resize(dot);
+    const Paths paths = Paths::title();
+    struct ps5_library library;
+    if (ps5_library_load(&library, paths.playlists.c_str(), paths.info.c_str(),
+                         paths.cores.c_str()) == 0)
+        for (size_t i = 0; i < library.game_count; i++)
+            if (game.content == library.games[i].path)
+            {
+                const struct ps5_library_system &system = library.systems[library.games[i].system];
+                game.name = library.games[i].label;
+                game.crc32 = library.games[i].crc32;
+                if (system.known)
+                    game.platform = system.id;
+                break;
+            }
+    ps5_library_free(&library);
+    return game;
+}
+
+/* The game whose core is open, for its save data after it ended. */
+std::mutex playing_lock;
+SyncGame playing;
+std::string playing_core;
 
 TitleServices services;
 std::unique_ptr<ui::Screen> screen;
@@ -201,6 +321,28 @@ extern "C" void ps5_remote_start(void)
 {
     started = true;
     start_threads();
+    /* save-sync.json for the player to fill in, and what waits since an earlier start. */
+    if (!prepare_save_config(Paths::title().config + "/save-sync.json"))
+        std::fprintf(stderr, "[save sync] save-sync.json is not readable as JSON: it is left as "
+                             "it is\n");
+    save_jobs().resume_pending();
+}
+
+extern "C" void ps5_save_sync_before(const char *content, const char *core, const char *savefile,
+                                     const char *savestate)
+{
+    if (!content || !*content || !core || is_remote_core(core) || !savefile || !*savefile)
+        return;
+    SaveJobs &jobs = save_jobs();
+    if (!jobs.wanted())
+        return;
+    const SyncGame game = sync_game_of(content, core, savefile, savestate);
+    {
+        std::lock_guard<std::mutex> guard(playing_lock);
+        playing = game;
+        playing_core = core;
+    }
+    jobs.sync_before(game, sync_timeout);
 }
 
 extern "C" void ps5_remote_core_opening(const char *path)
@@ -211,6 +353,19 @@ extern "C" void ps5_remote_core_opening(const char *path)
 
 extern "C" void ps5_remote_core_closed(const char *path)
 {
+    /* Its save files are written: they go up. */
+    SyncGame ended;
+    {
+        std::lock_guard<std::mutex> guard(playing_lock);
+        if (path && playing_core == path)
+        {
+            ended = playing;
+            playing = SyncGame();
+            playing_core.clear();
+        }
+    }
+    if (!ended.content.empty())
+        save_jobs().played(ended);
     if (started && !is_remote_core(path))
         start_threads();
 }
