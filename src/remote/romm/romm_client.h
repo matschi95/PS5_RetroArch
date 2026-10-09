@@ -11,6 +11,9 @@
  *   "token": "rmm_...",                      a RomM client API token (Profile > Client tokens),
  *   "username": "me", "password": "secret",  or the account's name and password instead
  *   "platforms": ["snes", "psx"]             optional: only these platforms' slugs
+ *
+ * Every backend takes RomM minimum_version or newer (the oldest tools/check-romm.py checked
+ * with); an older server is refused before anything else is asked, saying so.
  */
 #pragma once
 
@@ -21,11 +24,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
 namespace ps5::remote::romm
 {
+/* The oldest RomM the backends take. */
+inline constexpr char minimum_version[] = "5.3.0";
+
 class Client
 {
   public:
@@ -79,6 +86,12 @@ class Client
     bool games(std::vector<SourceGame> *games, const Stopped &stopped, std::string *error,
                unsigned timeout = 0) const;
 
+    /* Whether the server is minimum_version or newer, by its heartbeat (asked until it was).
+     * False with *error when it does not answer or is older; too_old() then says its version. */
+    bool check_version(const Stopped &stopped, std::string *error, unsigned timeout = 0) const;
+    /* The server's version when the last check found it older than minimum_version; "" else. */
+    std::string too_old() const;
+
     /* What an answer's status means, for the screen. path: what was asked for ("/api/..."), so
      * a refusal (403) can name the token's scope that is missing. */
     std::string status_error(int status, const std::string &path = {}) const;
@@ -101,12 +114,17 @@ class Client
     const std::string authorization_;
     const std::vector<std::string> platforms_;
     const std::string file_;
+    mutable std::mutex version_lock_;
+    mutable bool version_ok_ = false;
+    mutable std::string too_old_;
 };
 
 /* ---- the parts, for tests ---- */
+/* Whether a version RomM's heartbeat says ("5.3.0", "5.4.0-alpha.1") is minimum_version or
+ * newer; a version that is no number ("development") is taken to be. */
+bool new_enough(const std::string &version);
 /* The firmware of /api/firmware's answer, each with its platform's names from /api/platforms'
- * (the platform's folder, slug, display name and name; by its folder before RomM 5.3, which
- * names no platform); false when they are no such lists. */
+ * (the platform's folder, slug, display name and name); false when they are no such lists. */
 bool parse_firmware(const std::string &firmware, const std::string &platforms,
                     std::vector<FirmwareFile> *files);
 /* The server's address as typed, made usable: "nas:3000/" is http://nas:3000; "" when it is

@@ -254,10 +254,10 @@ class SyncDialog
         case SyncView::failed:
             c.text(inner_x, y, "The save data could not be synced", color::warning);
             y = c.block(inner_x, y + 34,
-                        view.too_old ? "RomM " + view.server_version +
-                                           " is older than the save sync takes: it needs RomM " +
-                                           view.needed_version + " or newer."
-                                     : view.error,
+                        view.too_old
+                            ? "RomM " + view.server_version + " is too old: it needs RomM " +
+                                  view.needed_version + " or newer."
+                            : view.error,
                         color::meta, inner_width) +
                 24;
             break;
@@ -710,8 +710,9 @@ class DownloadsScreen final : public Screen
             row.state = source.refreshing ? "Reading..."
                         : source.online   ? std::to_string(source.games) +
                                               (source.games == 1 ? " game" : " games")
-                        : trouble ? "Not reachable"
-                                  : "Not connected yet";
+                        : source.too_old ? "Too old"
+                        : trouble        ? "Not reachable"
+                                         : "Not connected yet";
             if (trouble)
             {
                 row.warning = true;

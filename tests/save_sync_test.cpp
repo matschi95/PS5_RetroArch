@@ -1,10 +1,11 @@
 /* The save sync (src/remote/save_sync.h, save_config.h), on the host, with a store of the
  * test's own: which side changed, conflicts and the player's choice, save states the store or
  * the console has alone, a store that keeps no hash, backups, a game the store does not have;
- * save-sync.json; RomM's times and versions (src/remote/romm/romm_saves.h).
+ * save-sync.json; RomM's times and versions (src/remote/romm/romm_saves.h, romm_client.h).
  */
 #include "../src/remote/backends.h"
 #include "../src/remote/files.h"
+#include "../src/remote/romm/romm_client.h"
 #include "../src/remote/romm/romm_saves.h"
 #include "../src/remote/save_jobs.h"
 #include "../src/remote/save_config.h"
@@ -230,9 +231,9 @@ int main(int argc, char **argv)
            remote::romm::parse_time("2026-10-08T12:34:56") == 1791462896 &&
            remote::romm::parse_time("") == 0);
     assert(remote::romm::format_time(1791462896) == "2026-10-08T12:34:56Z");
-    assert(remote::romm::can_sync("5.0.0") && remote::romm::can_sync("5.3.1") &&
-           remote::romm::can_sync("5.0.0-beta.1") && remote::romm::can_sync("development") &&
-           !remote::romm::can_sync("4.9.0"));
+    assert(remote::romm::new_enough("5.3.0") && remote::romm::new_enough("5.3.1") &&
+           remote::romm::new_enough("5.4.0-alpha.1") && remote::romm::new_enough("development") &&
+           !remote::romm::new_enough("5.2.0") && !remote::romm::new_enough("4.9.0"));
 
     /* save-sync.json: made with an empty server; the player's fields and order stay; a file
      * that is no JSON is left alone; paired, the sign-in typed in before goes. */

@@ -26,7 +26,8 @@ class RommFirmware final : public FirmwareSource
     {
         /* With the platforms: a file names only its platform's id. */
         std::string platforms, firmware;
-        if (!client_->get("/api/firmware", stopped, &firmware, error, timeout) ||
+        if (!client_->check_version(stopped, error, timeout) ||
+            !client_->get("/api/firmware", stopped, &firmware, error, timeout) ||
             !client_->get("/api/platforms", stopped, &platforms, error, timeout))
             return false;
         if (!parse_firmware(firmware, platforms, files))

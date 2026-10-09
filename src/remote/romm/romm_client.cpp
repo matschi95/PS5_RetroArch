@@ -8,6 +8,7 @@
 #include "../files.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <utility>
 
 namespace ps5::remote::romm
@@ -92,8 +93,8 @@ std::string Client::status_error(int status, const std::string &path) const
         return "RomM did not accept the token or password in " + file_;
     if (status == 403)
     {
-        /* A refusal: RomM 4.9 answers a wrong token or password so as well, so both are
-         * named, with the scope a client API token needs for what was asked. */
+        /* A refusal: both a wrong token or password and a missing scope are named, with the
+         * scope a client API token needs for what was asked. */
         static const std::pair<const char *, const char *> scopes[] = {
             {"/api/platforms", "platforms.read"},
             {"/api/roms", "roms.read"},
@@ -248,6 +249,33 @@ bool Client::fetch(const std::string &path_or_url, uint64_t limit, const Stopped
     return true;
 }
 
+bool Client::check_version(const Stopped &stopped, std::string *error, unsigned timeout) const
+{
+    {
+        std::lock_guard<std::mutex> guard(version_lock_);
+        if (version_ok_)
+            return true;
+    }
+    std::string body;
+    if (!get("/api/heartbeat", stopped, &body, error, timeout))
+        return false;
+    Json heartbeat;
+    Json::parse(body, &heartbeat);
+    const std::string version = text(heartbeat["SYSTEM"], "VERSION");
+    std::lock_guard<std::mutex> guard(version_lock_);
+    version_ok_ = new_enough(version);
+    too_old_ = version_ok_ ? "" : version;
+    if (!version_ok_)
+        *error = "RomM " + version + " is too old: it needs RomM " + minimum_version + " or newer";
+    return version_ok_;
+}
+
+std::string Client::too_old() const
+{
+    std::lock_guard<std::mutex> guard(version_lock_);
+    return too_old_;
+}
+
 bool Client::stream(const std::string &path, uint64_t offset, Receiver &receiver,
                     std::string *error) const
 {
@@ -320,6 +348,8 @@ bool Client::platform_filter(const Stopped &stopped, unsigned timeout, std::stri
 bool Client::games(std::vector<SourceGame> *games, const Stopped &stopped, std::string *error,
                    unsigned timeout) const
 {
+    if (!check_version(stopped, error, timeout))
+        return false;
     std::string filter;
     if (!platforms_.empty() && !platform_filter(stopped, timeout, &filter, error))
         return false;
@@ -365,6 +395,15 @@ std::string normal_url(std::string url)
     return scheme + url.substr(url.find("://"));
 }
 
+bool new_enough(const std::string &version)
+{
+    int have[3] = {}, need[3] = {};
+    if (std::sscanf(version.c_str(), "%d.%d.%d", &have[0], &have[1], &have[2]) < 2)
+        return true;
+    (void)std::sscanf(minimum_version, "%d.%d.%d", &need[0], &need[1], &need[2]);
+    return !std::lexicographical_compare(have, have + 3, need, need + 3);
+}
+
 bool parse_firmware(const std::string &firmware, const std::string &platforms,
                     std::vector<FirmwareFile> *files)
 {
@@ -381,17 +420,12 @@ bool parse_firmware(const std::string &firmware, const std::string &platforms,
         FirmwareFile file;
         file.id = id_text(item["id"]);
         file.name = text(item, "file_name");
-        /* Its platform by its id; before RomM 5.3 only its folder tells (bios/<fs_slug>). */
         const std::string platform = id_text(item["platform_id"]);
-        const std::string folder = files::base_name(text(item, "file_path"));
         for (const Json &entry : known.items)
-            if (!platform.empty() ? id_text(entry["id"]) == platform
-                                  : !folder.empty() && text(entry, "fs_slug") == folder)
+            if (!platform.empty() && id_text(entry["id"]) == platform)
                 for (const char *field : {"fs_slug", "slug", "display_name", "name"})
                     if (!text(entry, field).empty())
                         file.systems.push_back(text(entry, field));
-        if (file.systems.empty() && platform.empty() && !folder.empty())
-            file.systems.push_back(folder);
         file.size = item["file_size_bytes"].whole();
         file.crc32 = text(item, "crc_hash");
         file.md5 = text(item, "md5_hash");

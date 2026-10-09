@@ -64,6 +64,7 @@ struct SourceState
     bool refresh_wanted = false;
     bool refreshing = false;
     bool online = false;
+    bool too_old = false;     /* the last look found the server older than its backend takes */
     bool listed_once = false; /* its list was read since the title started */
     Clock::time_point listed_at{};
     std::vector<Game> games;
@@ -880,7 +881,9 @@ void *list_thread(void *)
             s.listing = false;
             if (find_source(s, key) == state && !s.halt.load())
             {
+                std::string version, needed;
                 state->online = false;
+                state->too_old = source->too_old(&version, &needed);
                 state->error = error;
                 log(state->name + ": " + error);
             }
@@ -909,6 +912,7 @@ void *list_thread(void *)
             changed = true;
         }
         state->online = true;
+        state->too_old = false;
         state->error.clear();
         state->listed_once = true;
         state->listed_at = Clock::now();
@@ -1332,7 +1336,9 @@ void list_new(const Paths &paths, unsigned timeout)
         std::lock_guard<std::mutex> lock(s.lock);
         /* Not listed_once: the list thread reads it again once RetroArch is up, with the
          * covers. */
+        std::string version, needed;
         state->online = read_;
+        state->too_old = !read_ && state->source->too_old(&version, &needed);
         state->error = read_ ? "" : error;
         state->listed_at = Clock::now();
         state->games.clear();
@@ -1430,6 +1436,7 @@ Status current()
         source.address = state->source ? state->source->address() : std::string();
         source.refreshing = state->refreshing || state->refresh_wanted;
         source.online = state->online;
+        source.too_old = state->too_old;
         source.error = state->error;
         source.games = state->games.size();
         status.sources.push_back(std::move(source));

@@ -23,7 +23,9 @@ class SampleServices final : public ui::Services
         status_.configured = true;
         status_.sources = {{"home", "Home", "http://192.168.1.20:3000", false, true, "", 214},
                            {"office", "Office", "http://nas.office:8080", false, false,
-                            "The server did not answer (network or DNS).", 0}};
+                            "The server did not answer (network or DNS).", 0},
+                           {"attic", "Attic", "http://attic:3000", false, false,
+                            "RomM 5.2.0 is too old: it needs RomM 5.3.0 or newer", 0, true}};
         remote::Game smw = make("home", "1", "Super Mario World", 524288);
         remote::Game smw_office = make("office", "70", "Super Mario World", 524288);
         remote::Game ff7 = make("home", "3", "Final Fantasy VII", 2147483648ull);
@@ -383,7 +385,8 @@ int main(int argc, char **argv)
         shot(*screen, "21-reading");
         services.status_.sources[0].refreshing = false;
         shot(*screen, "22-read");
-        /* The failed one: tried again; then cancelled. */
+        /* The failed one (below the three sources): tried again; then cancelled. */
+        screen->input(ui::down);
         screen->input(ui::down);
         screen->input(ui::down);
         screen->input(ui::down);

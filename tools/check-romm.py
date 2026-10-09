@@ -5,8 +5,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """check-romm.py [RomM version ...]
 
-For each RomM version (default: the oldest the save sync takes, romm::minimum_version, the newest
-it was checked with, and one older than the oldest, whose save sync is to be refused), starts a
+For each RomM version (default: the oldest the backends take, romm::minimum_version, the newest
+they were checked with, and one older than the oldest, which each of them is to refuse), starts a
 RomM in Docker (tools/romm-test/docker-compose.yml) with a few fake SNES games and a BIOS, makes
 an admin and a player with client API tokens, scans the library, and runs
 tests/romm_live_test.cpp against it as the player; then takes it all down again. The first run of a version downloads its image
@@ -33,9 +33,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "tools/romm-test/docker-compose.yml"
 SCAN = ROOT / "tools/romm-test/scan.py"
-# The newest RomM the save sync was checked with, and one older than minimum_version.
+# The newest RomM the backends were checked with, and one older than minimum_version.
 NEWEST = "5.3.1"
-TOO_OLD = "4.9.0"
+TOO_OLD = "5.2.0"
 SCOPES = ["platforms.read", "roms.read", "assets.read", "assets.write", "devices.read", "devices.write", "me.read",
           "firmware.read"]
 SOURCES = ["tests/romm_live_test.cpp", "src/remote/remote.cpp", "src/remote/firmware.cpp", "src/remote/library.cpp", "src/remote/save_config.cpp", "src/remote/files.cpp",
@@ -52,7 +52,7 @@ GAMES = {
 
 
 def minimum_version():
-    text = (ROOT / "src/remote/romm/romm_saves.h").read_text()
+    text = (ROOT / "src/remote/romm/romm_client.h").read_text()
     return re.search(r'minimum_version\[\] = "([0-9.]+)"', text).group(1)
 
 
@@ -131,7 +131,7 @@ def run_version(version, binary, work):
         print("check-romm:", scanned.stdout.strip().splitlines()[-1] if scanned.stdout.strip() else scanned.stderr[-500:])
         old = version == TOO_OLD
         if old:
-            # RomM 4.9 has no client API tokens: the player signs in with the password.
+            # The player signs in with the password: the server is refused before scopes matter.
             token = bare = None
         else:
             token = ask(url, "/api/client-tokens", {"name": "check", "scopes": SCOPES}, user=player)["raw_token"]

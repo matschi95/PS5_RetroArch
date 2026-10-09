@@ -210,8 +210,10 @@ Your collection can stay on a server in your network. Its games are listed in
 RetroArch and in EmulationStation beside the ones on the console, and a game is
 downloaded the first time you play it. Nothing is streamed: once downloaded, a game
 is on the console like any other. The supported server is
-[RomM](https://github.com/rommapp/romm) (a current version); each kind of server is a
-backend (`src/remote/source.h`), and several servers can be set up at once.
+[RomM](https://github.com/rommapp/romm) **5.3 or newer**, for the games, their BIOS
+files and the save sync alike; an older one is refused, and **Downloads** shows it as
+*Too old* with the version it needs. Each kind of server is a backend
+(`src/remote/source.h`), and several servers can be set up at once.
 
 - **Set up:** save `config/remote/sources.json` over FTP:
   ```json
@@ -272,8 +274,8 @@ backend (`src/remote/source.h`), and several servers can be set up at once.
 
 Your saves and save states can be kept on the server too, so that a game goes on where
 you left it on another console or device. It is set up apart from the games: another
-server, or another user of the same one, works as well. RomM 5.0 or newer keeps them
-(as RomM keeps RetroArch's: the save in the slot *autosave* of the core, the save states
+server, or another user of the same one, works as well. RomM keeps them (5.3 or newer,
+as for the games; as RomM keeps RetroArch's: the save in the slot *autosave* of the core, the save states
 by their file names); each kind of server is a backend (`src/remote/save_store.h`).
 
 - **Pair:** the playlist *Remote* has **Save sync**: choose one of your download
@@ -477,11 +479,11 @@ patches live in `patches/`; fetched and generated trees stay in ignored
 `vendor/`, `.deps/`, `build/` and `dist/` directories.
 
 The download sources and the save sync are also checked against real RomM servers
-in Docker: `python3 tools/check-romm.py` starts RomM 5.0.0 (the oldest the save sync
-takes), 5.3.1 and 4.9.0 (to be refused) with a few fake SNES games, and checks the
-listing, downloads checked as they come and gone on with, the save and the save
-states between two consoles, conflicts, pairing and refused tokens
-(`tests/romm_live_test.cpp`). It needs Docker with Compose and is skipped without
+in Docker: `python3 tools/check-romm.py` starts RomM 5.3.0 (the oldest the title
+takes), 5.3.1 and 5.2.0 (to be refused) with a few fake SNES games and a BIOS, and
+checks the listing, downloads checked as they come and gone on with, the BIOS files,
+the save and the save states between two consoles, conflicts, pairing and refused
+tokens (`tests/romm_live_test.cpp`). It needs Docker with Compose and is skipped without
 it; the first run of a version downloads its image (about 1 GB). Downloads are
 written there by the host, not by the console's FTP server, whose streams only the
 console has.

@@ -191,6 +191,7 @@ struct SourceStatus
     bool online = false; /* the last look at it worked */
     std::string error;   /* why the last look failed, or what is wrong with its entry */
     size_t games = 0;
+    bool too_old = false; /* it failed as the server is older than its backend takes */
 };
 
 struct Status

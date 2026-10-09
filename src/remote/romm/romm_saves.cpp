@@ -117,30 +117,16 @@ class RommSaves final : public SaveStore
     }
     bool too_old(std::string *version, std::string *needed) const override
     {
-        if (too_old_.empty())
-            return false;
-        *version = too_old_;
+        *version = client_->too_old();
         *needed = minimum_version;
-        return true;
+        return !version->empty();
     }
 
     bool prepare(const Stopped &stopped, std::string *error) override
     {
         stopped_ = stopped; /* every transfer of this sync asks it */
-        std::string body;
-        if (!client_->get("/api/heartbeat", stopped, &body, error))
+        if (!client_->check_version(stopped, error))
             return false;
-        Json heartbeat;
-        Json::parse(body, &heartbeat);
-        const std::string version = text(heartbeat["SYSTEM"], "VERSION");
-        too_old_.clear();
-        if (!can_sync(version))
-        {
-            too_old_ = version;
-            *error = "RomM " + version + " is older than the save sync takes: it needs RomM " +
-                     minimum_version + " or newer";
-            return false;
-        }
         /* Who it is, for the menu and for what was in step with whom (save_sync.cpp): a token
          * may not be allowed to say (the scope me.read), always the same way. A server that
          * does not answer now ends the sync instead of making it someone else. */
@@ -478,8 +464,7 @@ class RommSaves final : public SaveStore
     const std::unique_ptr<Client> client_;
     const std::string folder_;
     std::string user_;
-    std::string too_old_; /* the server's version, when it is older than minimum_version */
-    Stopped stopped_;     /* from prepare: a game starts, the title closes */
+    Stopped stopped_; /* from prepare: a game starts, the title closes */
     std::string device_;
     int64_t session_ = 0;
     int done_ = 0;
@@ -500,7 +485,7 @@ bool pair_start(const Json &settings, const std::string &folder, PairingStart *s
                 std::string *error, const Stopped &stopped)
 {
     std::unique_ptr<Client> client = unsigned_client(settings, error);
-    if (!client)
+    if (!client || !client->check_version(stopped, error))
         return false;
     Json payload = Json::record();
     payload.set("client_device_identifier", Json::of("ps5-retroarch-" + console_id(folder)));
@@ -513,11 +498,6 @@ bool pair_start(const Json &settings, const std::string &folder, PairingStart *s
     Client::Answer answer;
     if (!client->send("POST", "/api/auth/device/init", payload.write(), &answer, error, stopped))
         return false;
-    if (answer.status == 404 || answer.status == 405)
-    {
-        *error = std::string("Pairing needs RomM ") + minimum_version + " or newer";
-        return false;
-    }
     Json made;
     Json::parse(answer.body, &made);
     if ((answer.status != 200 && answer.status != 201) || text(made, "device_code").empty())
@@ -654,14 +634,5 @@ std::string format_time(int64_t seconds)
     char out[32];
     std::strftime(out, sizeof out, "%Y-%m-%dT%H:%M:%SZ", &utc);
     return out;
-}
-
-bool can_sync(const std::string &version)
-{
-    int have[3] = {}, need[3] = {};
-    if (std::sscanf(version.c_str(), "%d.%d.%d", &have[0], &have[1], &have[2]) < 2)
-        return true;
-    (void)std::sscanf(minimum_version, "%d.%d.%d", &need[0], &need[1], &need[2]);
-    return !std::lexicographical_compare(have, have + 3, need, need + 3);
 }
 } // namespace ps5::remote::romm

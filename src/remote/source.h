@@ -96,6 +96,14 @@ class Source
                       unsigned timeout = 0) = 0;
     /* A game's cover as a picture file's bytes (PNG or JPEG); false when there is none. */
     virtual bool cover(const SourceGame &game, std::string *picture, const Stopped &stopped) = 0;
+    /* After list() failed: whether it was because the server is older than the backend takes,
+     * with the server's version and the oldest one taken. */
+    virtual bool too_old(std::string *version, std::string *needed) const
+    {
+        (void)version;
+        (void)needed;
+        return false;
+    }
     /* A file of a game from `offset` on, into the receiver (or from its start:
      * Receiver::begin). True when all of it came; false with *error otherwise, or when
      * the receiver stopped it. */

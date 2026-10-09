@@ -34,6 +34,13 @@ class RommSource final : public Source
         return client_->games(games, stopped, error, timeout);
     }
 
+    bool too_old(std::string *version, std::string *needed) const override
+    {
+        *version = client_->too_old();
+        *needed = minimum_version;
+        return !version->empty();
+    }
+
     bool cover(const SourceGame &game, std::string *picture, const Stopped &stopped) override
     {
         if (game.cover.empty())

@@ -3,19 +3,21 @@
  *
  *   romm-live-test <url> <token> <token with roms.read only> <folder> <library> <old: 0|1>
  *
- * A RomM older than the save sync takes (old) refuses the save sync, saying so, and lists its
- * games all the same. Otherwise: the games listed with their files and checksums, one
+ * A RomM older than the backends take (old, romm::minimum_version) is refused by each of them,
+ * saying so: the games, the firmware, the save sync and pairing. Otherwise: the games listed
+ * with their files and checksums, one
  * downloaded whole and checked as it came, one stopped part way and gone on with; the save
  * and the save states of a game synced between two consoles (each a device of its own): up,
  * unchanged, down, a conflict and the player's choices, a state the server keeps no hash of; a
- * token without the scopes the save sync needs refused, naming them. Firmware in the library's
- * bios/snes listed and fetched for a core that names it, with every version.
+ * token without the scopes the save sync needs refused, naming them; the firmware in the
+ * library's bios/snes listed and fetched for a core that names it.
  */
 #include "../src/remote/backends.h"
 #include "../src/remote/files.h"
 #include "../src/remote/library.h"
 #include "../src/remote/remote.h"
 #include "../src/remote/pairing.h"
+#include "../src/remote/romm/romm_client.h"
 #include "../src/remote/romm/romm_client.h"
 #include "../src/remote/romm/romm_saves.h"
 #include "../src/remote/save_config.h"
@@ -83,7 +85,7 @@ Json entry(const std::string &url, const std::string &token)
         settings.set("token", Json::of(token));
     else if (const char *user = std::getenv("ROMM_LIVE_USER"))
     {
-        /* RomM 4.9 has no client API tokens: the player's name and password. */
+        /* Without a token: the player's name and password. */
         const std::string pair = user;
         settings.set("username", Json::of(pair.substr(0, pair.find(':'))));
         settings.set("password", Json::of(pair.substr(pair.find(':') + 1)));
@@ -140,10 +142,44 @@ int main(int argc, char **argv)
     const bool old = std::strcmp(argv[6], "1") == 0;
     const Json settings = entry(url, token);
 
-    /* The games: all of them, with their files and checksums. */
+    /* A server older than the backends take: each refuses it, saying so. */
     std::string error;
     std::unique_ptr<remote::Source> source = remote::make_source("romm", settings, &error);
     check(source != nullptr, "a source of the entry " + error);
+    if (old)
+    {
+        const std::string too_old =
+            std::string("is too old: it needs RomM ") + remote::romm::minimum_version + " or newer";
+        std::vector<remote::SourceGame> games;
+        std::string version, needed;
+        const bool refused = source && !source->list(&games, &error, {}) &&
+                             source->too_old(&version, &needed) && !version.empty();
+        check(refused && error.find(too_old) != std::string::npos &&
+                  needed == remote::romm::minimum_version,
+              "the games refused: " + error);
+        auto firmware = remote::make_firmware_source("romm", settings, &error);
+        std::vector<remote::FirmwareFile> files_;
+        error.clear();
+        const bool firmware_refused = firmware && !firmware->list(&files_, &error, {});
+        check(firmware_refused && error.find(too_old) != std::string::npos,
+              "the firmware refused: " + error);
+        Console first = console_at(folder + "/first", library);
+        write(first.game.save, "save");
+        const remote::SyncResult result = sync(settings, first);
+        check(result.outcome == remote::SyncOutcome::failed && result.too_old &&
+                  result.needed == remote::romm::minimum_version,
+              "the save sync refused: " + result.message);
+        remote::PairingStart start;
+        error.clear();
+        const bool pairing_refused =
+            !remote::romm::pairing.start(settings, folder + "/pair", &start, &error, {});
+        check(pairing_refused && error.find(too_old) != std::string::npos,
+              "pairing refused: " + error);
+        std::printf("romm-live: %s\n", failures == 0 ? "PASS" : "FAIL");
+        return failures == 0 ? 0 : 1;
+    }
+
+    /* The games: all of them, with their files and checksums. */
     std::vector<remote::SourceGame> games;
     const bool listed = source && source->list(&games, &error, {});
     check(listed && games.size() == 3,
@@ -167,8 +203,7 @@ int main(int argc, char **argv)
         for (const auto &file : files_)
             if (file.name == "BS-X.bin")
                 bsx = &file;
-        /* Its CRC32 only from RomM 5.3 on: taken unchecked before. */
-        check(listed_ && bsx &&
+        check(listed_ && bsx && !bsx->crc32.empty() &&
                   std::find(bsx->systems.begin(), bsx->systems.end(), "snes") != bsx->systems.end(),
               "the firmware listed with its platform (" + std::to_string(files_.size()) + ") " +
                   error);
@@ -193,17 +228,7 @@ int main(int argc, char **argv)
         }
     }
 
-    /* The save sync of a server older than it takes: refused, saying so. */
     Console first = console_at(folder + "/first", library);
-    if (old)
-    {
-        write(first.game.save, "save");
-        const remote::SyncResult result = sync(settings, first);
-        check(result.outcome == remote::SyncOutcome::failed && result.too_old &&
-                  result.needed == remote::romm::minimum_version,
-              "an old RomM refused: " + result.message);
-        return failures == 0 ? 0 : 1;
-    }
 
     /* Downloads: one whole, checked as it came; one stopped part way and gone on with. */
     {

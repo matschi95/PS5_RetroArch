@@ -5,8 +5,8 @@
 """romm-mock-server.py <port file>
 
 For tests/test_romm.py: what tests/romm_test.cpp checks of the RomM backend. Serves
-/api/platforms, /api/roms (a page), a cover and /api/roms/<file id>/files/content/<name> (with
-Range) on 127.0.0.1 and a free port it writes to <port file>, signed in as "Bearer rmm_test" or
+/api/heartbeat (RomM 5.3.1; under /old, 5.2.0), /api/platforms, /api/roms (a page), a cover and
+/api/roms/<file id>/files/content/<name> (with Range) on 127.0.0.1 and a free port it writes to <port file>, signed in as "Bearer rmm_test" or
 "Basic" for player:secret. Files are made of a pattern of their id, so the check can tell every
 byte.
 
@@ -77,6 +77,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(url.query)
+        if url.path in ("/api/heartbeat", "/old/api/heartbeat"):
+            version = "5.2.0" if url.path.startswith("/old") else "5.3.1"
+            return self.send(200, json.dumps({"SYSTEM": {"VERSION": version}}).encode())
         if self.headers.get("Authorization") not in TOKENS:
             return self.send(401, b'{"detail":"Unauthorized"}')
         if url.path == "/api/platforms":

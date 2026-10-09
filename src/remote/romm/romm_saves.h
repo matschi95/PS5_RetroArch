@@ -15,7 +15,8 @@
  *
  * As RomM keeps RetroArch's: a game's save is in the slot "autosave" of the emulator that is
  * the core ("snes9x"), its save states are RomM's states of that emulator by their file names
- * (".state", ".state1", ".state.auto"). It uses RomM's save sync (RomM 5.0 and newer): the
+ * (".state", ".state1", ".state.auto"). It uses RomM's save sync (romm_client.h: the RomM it
+ * takes): the
  * console is a device of the user (registered once, kept in the store's folder), and the save's
  * versions are the server's (it keeps the last ten of the slot). RomM keeps no hash of a state:
  * a state's version is its id and when it was last written.
@@ -31,14 +32,10 @@
 
 namespace ps5::remote::romm
 {
-/* The oldest RomM the save sync takes: the oldest it was checked with (tools/check-romm.py). An
- * older server is not synced with; every sync says so. */
-inline constexpr char minimum_version[] = "5.0.0";
-
 std::unique_ptr<SaveStore> make_saves(const Json &settings, const std::string &folder,
                                       std::string *error);
 
-/* Pairing (pairing.h) by RomM's device authorization (RomM 5.0 and newer): the code is approved
+/* Pairing (pairing.h) by RomM's device authorization: the code is approved
  * on the server's page /pair/device, signed in as the player's user; the console gets a client
  * API token bound to a device of its own, which the save sync then is. */
 extern const Pairing pairing;
@@ -49,7 +46,4 @@ extern const Pairing pairing;
 int64_t parse_time(const std::string &text);
 /* A time as RomM reads it ("2026-10-08T12:34:56Z"). */
 std::string format_time(int64_t seconds);
-/* Whether a version RomM's heartbeat says ("4.9.0", "5.0.0-beta.1") is minimum_version or
- * newer; a version that is no number ("development") is taken to be. */
-bool can_sync(const std::string &version);
 } // namespace ps5::remote::romm

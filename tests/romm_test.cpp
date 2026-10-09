@@ -112,16 +112,19 @@ int main(int argc, char **argv)
         assert(firmware.size() == 1 && firmware[0].id == "5" && firmware[0].size == 524288 &&
                firmware[0].crc32 == "47b2b88b" && firmware[0].verified &&
                firmware[0].systems == std::vector<std::string>({"psx", "ps", "PlayStation"}));
-        /* RomM before 5.3: the platform by the file's folder. */
-        assert(romm::parse_firmware("[{\"id\":7,\"file_name\":\"BS-X.bin\",\"file_path\":"
-                                    "\"bios/snes\"},{\"id\":8,\"file_name\":\"x.bin\","
-                                    "\"file_path\":\"bios/gb\"}]",
-                                    "[{\"id\":3,\"slug\":\"snes\",\"fs_slug\":\"snes\"}]",
-                                    &firmware));
-        assert(firmware.size() == 2 &&
-               firmware[0].systems == std::vector<std::string>({"snes", "snes"}) &&
-               firmware[1].systems == std::vector<std::string>({"gb"}));
         assert(!romm::parse_firmware("{}", "[]", &firmware));
+    }
+
+    /* A server older than the backends take: refused before anything else, saying so. */
+    {
+        auto old = source("{\"url\":\"" + url + "/old\",\"token\":\"rmm_test\"}");
+        std::vector<remote::SourceGame> none;
+        std::string why, version, needed;
+        assert(!old->list(&none, &why, never) && old->too_old(&version, &needed));
+        assert(version == "5.2.0" && needed == romm::minimum_version &&
+               why == std::string("RomM 5.2.0 is too old: it needs RomM ") + romm::minimum_version +
+                          " or newer");
+        assert(romm::new_enough("5.3.0") && !romm::new_enough("5.2.9"));
     }
 
     /* The list: in pages, signed in by token or password, what is the game kept. */
