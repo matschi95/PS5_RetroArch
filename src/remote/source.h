@@ -45,6 +45,9 @@ struct SourceFile
     FileKind kind = FileKind::game;
     /* What the source knows of its contents, as hex digits; empty when it does not. */
     std::string crc32, md5, sha1;
+    /* They are of what the file unpacks to (an archive's games, as RomM hashes them): they
+     * tell the game apart, but the file's own bytes are not checked against them. */
+    bool unpacked = false;
 };
 
 struct SourceGame

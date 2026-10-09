@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <random>
 #include <utility>
 
@@ -49,6 +50,25 @@ std::string lower(std::string text)
 std::string text(const Json &object, const char *key)
 {
     return object[key].kind == Json::string ? object[key].text : std::string();
+}
+
+/* Whether RomM's hashes of a game file are of what it unpacks to: an archive's are of the
+ * files in it (archive_members lists them), and a compressed file's of what it decompresses
+ * to (backend/handler/filesystem/roms_handler.py), so they match hash databases and not the
+ * bytes downloaded. */
+bool unpacked_hashes(const Json &entry, const std::string &name)
+{
+    if (entry["archive_members"].kind == Json::array)
+        return true;
+    const std::string file = lower(name);
+    for (const char *extension :
+         {".zip", ".7z", ".rar", ".tar", ".tgz", ".tbz2", ".txz", ".gz", ".bz2", ".xz"})
+    {
+        const size_t length = std::strlen(extension);
+        if (file.size() > length && file.compare(file.size() - length, length, extension) == 0)
+            return true;
+    }
+    return false;
 }
 
 /* An id as text: a number, or a string that is not empty or "0". */
@@ -532,6 +552,7 @@ bool parse_page(const std::string &text_, std::vector<SourceGame> *games, size_t
             file.crc32 = text(entry, "crc_hash");
             file.md5 = text(entry, "md5_hash");
             file.sha1 = text(entry, "sha1_hash");
+            file.unpacked = unpacked_hashes(entry, file.name);
             game.files.push_back(std::move(file));
         }
         std::string cover = text(item, "path_cover_small");

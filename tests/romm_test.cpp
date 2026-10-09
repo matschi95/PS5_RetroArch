@@ -100,6 +100,21 @@ int main(int argc, char **argv)
                error == "No server address (\"url\") in save-sync.json");
         std::vector<remote::SourceGame> games;
         assert(!romm::parse_page("{\"items\":{}}", &games) && !romm::parse_page("[]", &games));
+        /* An archive's hashes are of what is in it (archive_members, or its name says it is
+         * one): they do not check the download. */
+        assert(romm::parse_page(
+            "{\"items\":[{\"id\":24,\"name\":\"Super Mario 64\",\"platform_fs_slug\":\"n64\","
+            "\"fs_path\":\"roms/n64\",\"fs_name\":\"SM64.zip\",\"files\":["
+            "{\"id\":1,\"file_name\":\"SM64.zip\",\"full_path\":\"roms/n64/SM64.zip\","
+            "\"crc_hash\":\"635a2bff\",\"archive_members\":[{\"name\":\"SM64.z64\"}]},"
+            "{\"id\":2,\"file_name\":\"b.7Z\",\"crc_hash\":\"11111111\"},"
+            "{\"id\":3,\"file_name\":\"c.z64\",\"crc_hash\":\"22222222\","
+            "\"archive_members\":null}]}]}",
+            &games));
+        assert(games.size() == 1 && games[0].files.size() == 3 &&
+               games[0].files[0].crc32 == "635a2bff" && games[0].files[0].unpacked &&
+               games[0].files[1].unpacked && !games[0].files[2].unpacked);
+        games.clear();
         /* Firmware, each with its platform's names; one gone from the server's drive is not. */
         assert(remote::find_backend("romm")->firmware);
         std::vector<remote::FirmwareFile> firmware;

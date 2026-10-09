@@ -500,6 +500,9 @@ int main(int argc, char **argv)
     };
     home.games[0].ids["igdb"] = "1070";
     home.games[0].cover = "/smw.png";
+    /* Hashes of what a file unpacks to (RomM's of an archive) do not check its bytes. */
+    home.games[2].files[1].crc32 = "0badc0de";
+    home.games[2].files[1].unpacked = true;
     office.files = {{"700", smw}, {"710", chrono}};
     office.covers = {{"/ct.jpg", "\xff\xd8 chrono"}};
     office.games = {
@@ -626,6 +629,8 @@ int main(int argc, char **argv)
     until([] { return remote::downloads().empty(); });
     assert(remote::placed_folder("home", "3") == paths.content + "/psx/Final Fantasy VII");
     assert(read(paths.content + "/psx/Final Fantasy VII/FF7.bin") == ff7_bin);
+    remote::Game ff7_game;
+    assert(remote::find("home", "3", &ff7_game) && ff7_game.parts[1].unpacked);
     firmware_checks(bios);
 
     /* At the next start: into the player's own playlist, the rest of it kept, and listed on

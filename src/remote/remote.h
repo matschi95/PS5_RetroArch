@@ -93,6 +93,7 @@ struct Part
     std::string name; /* its path inside the game's folder */
     uint64_t size = 0;
     std::string crc32, md5, sha1; /* what the source knows of its contents */
+    bool unpacked = false;        /* they are of what it unpacks to (SourceFile::unpacked) */
 };
 
 /* A game on a source. */

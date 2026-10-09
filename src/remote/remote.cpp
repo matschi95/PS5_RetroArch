@@ -39,6 +39,8 @@ constexpr auto refresh_age = std::chrono::minutes(15);
 /* A download that goes on fetches its last bytes again: after a power cut, the end of a
  * file may not hold what was written there. */
 constexpr uint64_t rewind_bytes = 4u << 20;
+/* A kept list of another format is listed anew (2: Part::unpacked). */
+constexpr uint64_t catalog_format = 2;
 
 struct Entry
 {
@@ -205,7 +207,8 @@ bool make_game(const std::string &source, const SourceGame &from, Game *game)
         if (file.kind != FileKind::game || name.empty() ||
             std::find(names.begin(), names.end(), name) != names.end())
             continue;
-        game->parts.push_back({file.id, name, file.size, file.crc32, file.md5, file.sha1});
+        game->parts.push_back(
+            {file.id, name, file.size, file.crc32, file.md5, file.sha1, file.unpacked});
         names.push_back(name);
         sizes.push_back(file.size);
         game->size += file.size;
@@ -232,8 +235,8 @@ SourceGame as_source_game(const Game &game)
     source.folder = game.folder;
     source.cover = game.cover_source;
     for (const Part &part : game.parts)
-        source.files.push_back(
-            {part.id, part.name, part.size, FileKind::game, part.crc32, part.md5, part.sha1});
+        source.files.push_back({part.id, part.name, part.size, FileKind::game, part.crc32, part.md5,
+                                part.sha1, part.unpacked});
     return source;
 }
 
@@ -304,6 +307,8 @@ Json catalog_games(const std::vector<Game> &list)
             entry.set("crc32", Json::of(part.crc32));
             entry.set("md5", Json::of(part.md5));
             entry.set("sha1", Json::of(part.sha1));
+            if (part.unpacked)
+                entry.set("unpacked", Json::of(true));
         }
         Json &ids = item.set("ids", Json::record());
         for (const auto &id : game.ids)
@@ -317,6 +322,7 @@ Json catalog_games(const std::vector<Game> &list)
 void save_catalog(const Shared &s, const SourceState &state)
 {
     Json catalog = Json::record();
+    catalog.set("format", Json::of(double(catalog_format)));
     catalog.set("signature", Json::of(state.signature));
     catalog.set("games", catalog_games(state.games));
     catalog.set("firmware", firmware_json(state.firmware_files));
@@ -334,7 +340,8 @@ void load_catalog(Shared &s, SourceState &state)
         !Json::parse(text_, &catalog))
         return;
     /* A list from another entry (another server, other settings) is not this one's. */
-    if (text(catalog, "signature") != state.signature)
+    if (text(catalog, "signature") != state.signature ||
+        catalog["format"].whole() != catalog_format)
         return;
     state.firmware_files = firmware_files(catalog["firmware"]);
     for (const Json &item : catalog["games"].items)
@@ -351,7 +358,7 @@ void load_catalog(Shared &s, SourceState &state)
         {
             game.parts.push_back({text(entry, "id"), part_path(text(entry, "name")),
                                   entry["size"].whole(), text(entry, "crc32"), text(entry, "md5"),
-                                  text(entry, "sha1")});
+                                  text(entry, "sha1"), entry["unpacked"].yes()});
             game.size += game.parts.back().size;
             if (game.parts.back().name == game.file)
                 game.crc32 = normal_crc(game.parts.back().crc32);
@@ -719,7 +726,7 @@ Outcome download_part(Source &source, const Paths &paths, const Game &game, cons
         return Outcome::failed;
     }
     /* Going on: written over from `start` (the rewound bytes come again), else a new file. */
-    StreamCheck check(part.crc32);
+    StreamCheck check(part.unpacked ? "" : part.crc32);
     if (start > 0 && !feed_from_drive(check, staged, base, start))
         return Outcome::stopped;
     const std::unique_ptr<Writer> writer =
@@ -728,10 +735,10 @@ Outcome download_part(Source &source, const Paths &paths, const Game &game, cons
         return Outcome::failed;
     state().current_done.store(base + start);
     FileReceiver receiver(*writer, staged, base, start, check);
-    const bool fetched = source.fetch(
-        as_source_game(game),
-        {part.id, part.name, part.size, FileKind::game, part.crc32, part.md5, part.sha1}, start,
-        receiver, error);
+    const bool fetched = source.fetch(as_source_game(game),
+                                      {part.id, part.name, part.size, FileKind::game, part.crc32,
+                                       part.md5, part.sha1, part.unpacked},
+                                      start, receiver, error);
     std::string written;
     const bool finished = writer->finish(&written);
     /* Stopped or failed: what the file has stays, to go on from. */
