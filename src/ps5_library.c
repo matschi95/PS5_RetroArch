@@ -574,20 +574,33 @@ static const char *entry_core(const struct ps5_library *library, const char *cor
     return "";
 }
 
+/* The name of the folder a game is in; a download source's stub's is the one its stubs'
+ * folder (PS5_LIBRARY_STUB_FOLDER) is in. */
 static void parent_folder_name(const char *path, char *out, size_t size)
 {
     const char *slash = strrchr(path, '/');
-    if (!slash || slash == path)
+    for (int up = 0; up < 2; up++)
     {
-        snprintf(out, size, "%s", "");
-        return;
+        if (!slash || slash == path)
+        {
+            snprintf(out, size, "%s", "");
+            return;
+        }
+        const char *start = slash - 1;
+        while (start > path && *start != '/')
+            start--;
+        if (*start == '/')
+            start++;
+        snprintf(out, size, "%.*s", (int)(slash - start), start);
+        if (strcmp(out, PS5_LIBRARY_STUB_FOLDER) != 0)
+            return;
+        if (start == path)
+        {
+            snprintf(out, size, "%s", "");
+            return;
+        }
+        slash = start - 1; /* the stubs' folder: the one it is in */
     }
-    const char *start = slash - 1;
-    while (start > path && *start != '/')
-        start--;
-    if (*start == '/')
-        start++;
-    snprintf(out, size, "%.*s", (int)(slash - start), start);
 }
 
 static void strip_lpl(const char *name, char *out, size_t size)
@@ -905,6 +918,11 @@ static void finish_systems(struct ps5_library *library)
                     common--;
             system->folder[common] = '\0';
         }
+        /* The stubs' folder: the one it is in (EmulationStation shows them in a folder). */
+        const size_t length = strlen(system->folder), stubs = strlen("/" PS5_LIBRARY_STUB_FOLDER);
+        if (length >= stubs &&
+            strcmp(system->folder + length - stubs, "/" PS5_LIBRARY_STUB_FOLDER) == 0)
+            system->folder[length - stubs] = '\0';
         if (!system->folder[0])
             snprintf(system->folder, sizeof(system->folder), "%s", "/");
         const struct ps5_library_core *core = core_by_path(library, system->core);

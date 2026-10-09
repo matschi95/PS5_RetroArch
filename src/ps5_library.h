@@ -24,8 +24,10 @@
  *     cores the title carries; a game's own playlist core still wins when it is
  *     launched (game mode). The fetch core of a game on a download source
  *     (PS5_LIBRARY_FETCH_CORE) is never a system's core;
- *   - a system's folder is the deepest folder all its games are in, and its
- *     extensions those of its games and of its core;
+ *   - a system's folder is the deepest folder all its games are in, never the
+ *     folder of a download source's stubs (PS5_LIBRARY_STUB_FOLDER) but the one it is
+ *     in, so they are in a folder of their own whether or not the system has games
+ *     on the console too; its extensions those of its games and of its core;
  *   - what RetroArch remembers of play goes with each game: whether it is in the
  *     favourites (builtin/content_favorites.lpl), its place in the history
  *     (builtin/content_history.lpl), and its runtime log
@@ -53,9 +55,11 @@ extern "C"
 #define PS5_LIBRARY_CORES "/app0/cores"
 #define PS5_LIBRARY_PATH_MAX 1024
 /* The core of a game that is on a download source and not yet here (src/remote/): it
- * fetches the game and has game mode run it. It runs no game itself, so it is never a
- * system's core. */
+ * fetches the game, which is then started from its system's playlist. It runs no game
+ * itself, so it is never a system's core. */
 #define PS5_LIBRARY_FETCH_CORE "remote_libretro.so"
+/* The folder, in a system's folder, of a download source's stubs (src/remote/library.h). */
+#define PS5_LIBRARY_STUB_FOLDER ".remote"
 
     /* A core the title carries, from its core info file. */
     struct ps5_library_core

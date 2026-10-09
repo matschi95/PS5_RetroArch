@@ -37,7 +37,8 @@ extern "C"
     /* A frame: the buttons pressed since the last one in, the screen drawn into
      * PS5_REMOTE_FRAME_WIDTH x PS5_REMOTE_FRAME_HEIGHT XRGB8888 pixels out. */
     void ps5_remote_core_frame(uint32_t pressed, uint32_t *pixels);
-    /* 1 once the screen is done: the core closes its content. */
+    /* 1 once the screen is done: the core closes its content. In game mode it stays 0: the
+     * title has RetroArch quit then, for the frontend to come back. */
     int ps5_remote_core_finished(void);
     /* The content is closed. */
     void ps5_remote_core_close(void);

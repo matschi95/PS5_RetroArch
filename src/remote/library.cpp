@@ -419,7 +419,7 @@ void sync(const Paths &paths)
         std::vector<Title> &list = platform.second;
         std::sort(list.begin(), list.end(), [](const Title &a, const Title &b)
                   { return a.games.front().name < b.games.front().name; });
-        const std::string stubs = paths.system_folder(platform.first) + "/.remote";
+        const std::string stubs = paths.system_folder(platform.first) + "/" PS5_LIBRARY_STUB_FOLDER;
         files::make_folders(stubs);
         std::vector<Json> entries;
         std::set<std::string> names;
@@ -502,7 +502,7 @@ void sync(const Paths &paths)
         if (!written.count(path) && !kept_covers.count(path))
         {
             files::remove_tree(path);
-            if (files::base_name(files::parent(path)) == ".remote")
+            if (files::base_name(files::parent(path)) == PS5_LIBRARY_STUB_FOLDER)
                 rmdir(files::parent(path).c_str()); /* when it is empty */
         }
     Json document = Json::record();

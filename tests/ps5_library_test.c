@@ -106,7 +106,8 @@ int main(int argc, char **argv)
                " \"core_path\": \"DETECT\", \"db_name\": \"content.lpl\"},\n"
                "{\"path\": \"/app0/content/PS1/Spyro (USA).bin\", \"label\": \"\","
                " \"core_path\": \"DETECT\", \"db_name\": \"content.lpl\"},\n"
-               "{\"path\": \"/app0/content/Nintendo - Game Boy/Tetris (World).zip\", \"label\": "
+               "{\"path\": \"/app0/content/Nintendo - Game Boy/.remote/Tetris (World).zip\", "
+               "\"label\": "
                "\"Tetris\","
                " \"core_path\": \"DETECT\", \"db_name\": \"content.lpl\"},\n"
                "{\"path\": \"/app0/content/ARCADE - CPS I, II & III/sf2.zip\", \"label\": \"sf2\","
@@ -210,6 +211,8 @@ int main(int argc, char **argv)
     const struct ps5_library_system *gb = system_of(&library, "gb");
     snprintf(path, sizeof(path), "%s/mgba_libretro.so", cores);
     assert(gb && strcmp(gb->core, path) == 0);
+    /* Only a download source's stubs: the folder they are in is not the system's. */
+    assert(strcmp(gb->folder, "/app0/content/Nintendo - Game Boy") == 0);
     const struct ps5_library_system *cps = system_of(&library, "cps");
     snprintf(path, sizeof(path), "%s/fbneo_libretro.so", cores);
     assert(cps && cps->known && strcmp(cps->core, path) == 0); /* FBNeo first, then MAME */

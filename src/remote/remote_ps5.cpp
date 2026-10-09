@@ -30,6 +30,7 @@
 
 #include "../frontend_mode_ps5.h"
 #include "../ps5_library.h"
+#include "command.h"
 #include "configuration.h"
 #include "playlist.h"
 #include "files.h"
@@ -346,37 +347,44 @@ TitleServices services;
 std::unique_ptr<ui::Screen> screen;
 Stub open_stub; /* the remote core's, while it is open */
 
-/* What was downloaded or deleted goes into the playlists now (library.h, sync), and
- * RetroArch's menu reads them again, as after a scan: the playlist shown, and the menu's tabs
- * (a system's playlist may be new). On the main thread, from the task queue. */
-void update_playlists()
+/* Runs `then` on RetroArch's main thread, between frames: a task's callback. */
+void on_main_thread(retro_task_callback_t then)
 {
     retro_task_t *task = task_init();
     if (!task)
         return;
     task->handler = [](retro_task_t *done) { task_set_flags(done, RETRO_TASK_FLG_FINISHED, true); };
-    task->callback = [](retro_task_t *, void *, void *, const char *)
-    {
-        sync(Paths::title());
-        if (playlist_t *cached = playlist_get_cached())
-        {
-            playlist_config_t config;
-            if (playlist_config_copy(playlist_get_config(cached), &config))
-            {
-                playlist_free_cached();
-                playlist_init_cached(&config);
-            }
-        }
-#ifdef HAVE_MENU
-        struct menu_state *menu = menu_state_get_ptr();
-        if (menu->driver_ctx && menu->driver_ctx->environ_cb)
-            menu->driver_ctx->environ_cb(MENU_ENVIRON_RESET_HORIZONTAL_LIST, nullptr,
-                                         menu->userdata);
-        menu->flags |= MENU_ST_FLAG_ENTRIES_NEED_REFRESH;
-#endif
-    };
+    task->callback = then;
     if (!task_queue_push(task))
         std::free(task);
+}
+
+/* What was downloaded or deleted goes into the playlists now (library.h, sync), and
+ * RetroArch's menu reads them again, as after a scan: the playlist shown, and the menu's tabs
+ * (a system's playlist may be new). */
+void update_playlists()
+{
+    on_main_thread(
+        [](retro_task_t *, void *, void *, const char *)
+        {
+            sync(Paths::title());
+            if (playlist_t *cached = playlist_get_cached())
+            {
+                playlist_config_t config;
+                if (playlist_config_copy(playlist_get_config(cached), &config))
+                {
+                    playlist_free_cached();
+                    playlist_init_cached(&config);
+                }
+            }
+#ifdef HAVE_MENU
+            struct menu_state *menu = menu_state_get_ptr();
+            if (menu->driver_ctx && menu->driver_ctx->environ_cb)
+                menu->driver_ctx->environ_cb(MENU_ENVIRON_RESET_HORIZONTAL_LIST, nullptr,
+                                             menu->userdata);
+            menu->flags |= MENU_ST_FLAG_ENTRIES_NEED_REFRESH;
+#endif
+        });
 }
 
 /* The remote core closed: what it downloaded (or deleted) goes into the playlists now. */
@@ -502,7 +510,19 @@ extern "C" void ps5_remote_core_frame(uint32_t pressed, uint32_t *pixels)
 
 extern "C" int ps5_remote_core_finished(void)
 {
-    return !screen || screen->finished();
+    const bool finished = !screen || screen->finished();
+    if (!finished || !ps5_frontend_game())
+        return finished; /* RetroArch's menu: the core ends its content */
+    /* Game mode: RetroArch quits as its own Quit does, so the frontend comes back (a core
+     * ending its content would leave RetroArch's menu up). The core runs until then. */
+    static bool quitting = false;
+    if (!quitting)
+    {
+        quitting = true;
+        on_main_thread([](retro_task_t *, void *, void *, const char *)
+                       { command_event(CMD_EVENT_QUIT, nullptr); });
+    }
+    return 0;
 }
 
 extern "C" void ps5_remote_core_close(void)
