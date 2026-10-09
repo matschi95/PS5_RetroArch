@@ -8,7 +8,8 @@
  * downloaded whole and checked as it came, one stopped part way and gone on with; the save
  * and the save states of a game synced between two consoles (each a device of its own): up,
  * unchanged, down, a conflict and the player's choices, a state the server keeps no hash of; a
- * token without the scopes the save sync needs refused, naming them.
+ * token without the scopes the save sync needs refused, naming them. Firmware in the library's
+ * bios/snes listed and fetched for a core that names it, with every version.
  */
 #include "../src/remote/backends.h"
 #include "../src/remote/files.h"
@@ -20,6 +21,7 @@
 #include "../src/remote/save_config.h"
 #include "../src/remote/save_sync.h"
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cstdio>
@@ -153,6 +155,43 @@ int main(int argc, char **argv)
             hashed = hashed || (file.name == "Alpha Quest (USA).sfc" &&
                                 remote::normal_crc(file.crc32) == crc_of(alpha));
     check(hashed, "a file's CRC32 as RomM hashed it");
+
+    /* Firmware: the BIOS in the library's bios/snes, for a core that names it (and one it
+     * does not have); a token without the scope told so. */
+    {
+        std::shared_ptr<remote::FirmwareSource> firmware =
+            remote::make_firmware_source("romm", settings, &error);
+        std::vector<remote::FirmwareFile> files_;
+        const bool listed_ = firmware && firmware->list(&files_, &error, {});
+        const remote::FirmwareFile *bsx = nullptr;
+        for (const auto &file : files_)
+            if (file.name == "BS-X.bin")
+                bsx = &file;
+        /* Its CRC32 only from RomM 5.3 on: taken unchecked before. */
+        check(listed_ && bsx &&
+                  std::find(bsx->systems.begin(), bsx->systems.end(), "snes") != bsx->systems.end(),
+              "the firmware listed with its platform (" + std::to_string(files_.size()) + ") " +
+                  error);
+        remote::CoreFirmware core;
+        core.core = "Snes9x";
+        core.platforms = {"snes"};
+        core.files = {{"BS-X.bin", true}, {"STBIOS.bin", false}};
+        const remote::FirmwareOutcome outcome =
+            remote::fetch_firmware(core, folder + "/system", {{"RomM", firmware, files_}}, {});
+        check(outcome.fetched == std::vector<std::string>{"BS-X.bin"} &&
+                  read(folder + "/system/BS-X.bin") == read(library + "/bios/snes/BS-X.bin") &&
+                  outcome.missing == std::vector<std::string>{"STBIOS.bin"},
+              "a core's firmware fetched: " + remote::firmware_notice(outcome, true));
+        if (!bare.empty())
+        {
+            std::shared_ptr<remote::FirmwareSource> refused =
+                remote::make_firmware_source("romm", entry(url, bare), &error);
+            error.clear();
+            const bool refused_ = refused && !refused->list(&files_, &error, {});
+            check(refused_ && error.find("firmware.read") != std::string::npos,
+                  "a token without the scope refused: " + error);
+        }
+    }
 
     /* The save sync of a server older than it takes: refused, saying so. */
     Console first = console_at(folder + "/first", library);

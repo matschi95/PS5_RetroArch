@@ -15,6 +15,7 @@
 #pragma once
 
 #include "../../scraper_http.h"
+#include "../firmware.h"
 #include "../source.h"
 
 #include <cstddef>
@@ -69,6 +70,11 @@ class Client
     /* What `path` has, into the file `file` (written whole or not at all). */
     bool download(const std::string &path, const std::string &file, std::string *error,
                   const Stopped &stopped = {}) const;
+    /* A file of the server (`path`, signed in) from `offset` on, into the receiver; a server
+     * that cannot go on from there, or holds less than was begun, sends it from its start
+     * (Receiver::begin). False with *error, or when the receiver stopped it. */
+    bool stream(const std::string &path, uint64_t offset, Receiver &receiver,
+                std::string *error) const;
     /* All the games of the platforms asked for (all of them without), with their files. */
     bool games(std::vector<SourceGame> *games, const Stopped &stopped, std::string *error,
                unsigned timeout = 0) const;
@@ -98,6 +104,11 @@ class Client
 };
 
 /* ---- the parts, for tests ---- */
+/* The firmware of /api/firmware's answer, each with its platform's names from /api/platforms'
+ * (the platform's folder, slug, display name and name; by its folder before RomM 5.3, which
+ * names no platform); false when they are no such lists. */
+bool parse_firmware(const std::string &firmware, const std::string &platforms,
+                    std::vector<FirmwareFile> *files);
 /* The server's address as typed, made usable: "nas:3000/" is http://nas:3000; "" when it is
  * not http or https. */
 std::string normal_url(std::string url);

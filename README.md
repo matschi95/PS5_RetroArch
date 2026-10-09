@@ -258,6 +258,15 @@ backend (`src/remote/source.h`), and several servers can be set up at once.
   that goes on reads what it has so far first (*Checking* in the queue). A damaged file
   is deleted and the download fails saying so; trying again downloads it again. A file
   the server knows no CRC32 of is taken by its size.
+- **BIOS files:** the firmware a core names in its info file (such as `scph5501.bin`
+  for the PlayStation) comes from your servers too, when your system folder lacks it:
+  as a game's core loads, and after a game of that system was downloaded. Only those
+  files are fetched, by their file names, each checked against the server's CRC32; a
+  file already on the console is never replaced. RomM keeps firmware per platform
+  (`bios/<platform>/` in its library, or uploaded on its web page); the server's lists
+  are read with its games, so a start asks the network only for a file that is missing.
+  The token needs the scope *firmware.read* for it. A notice says what came, and which
+  file a core needs that no server has.
 
 ### Save sync
 
@@ -311,7 +320,7 @@ usually `/data/homebrew/PPSA99169/`.
 | `cores/` and `info/` | Native cores and their metadata |
 | `config/retroarch.cfg` | Live RetroArch configuration |
 | `config/webui.cfg` | Saved global WebUI preferences |
-| `config/remote/` | Your game servers (`sources.json`), their game lists and the download queue; the save sync (`save-sync.json`, and in `save-sync/` what it keeps and the backups) |
+| `config/remote/` | Your game servers (`sources.json`), their game and firmware lists and the download queue; the save sync (`save-sync.json`, and in `save-sync/` what it keeps and the backups) |
 | `content/<system>/.remote/` | Entries of server games not yet downloaded |
 | `config/<core>/` | Core options and RetroArch overrides, per core and per game |
 | `config/remaps/<core>/` | Controller remaps, per core and per game |

@@ -190,6 +190,13 @@ std::unique_ptr<remote::Source> ps5::remote::make_source(const std::string &, co
     return nullptr;
 }
 
+/* No firmware either (in place of src/remote/backends.cpp). */
+std::unique_ptr<remote::FirmwareSource>
+ps5::remote::make_firmware_source(const std::string &, const Json &, std::string *)
+{
+    return nullptr;
+}
+
 /* The test's store (in place of src/remote/backends.cpp). */
 std::unique_ptr<remote::SaveStore> ps5::remote::make_save_store(const std::string &type,
                                                                 const Json &, const std::string &,

@@ -254,6 +254,8 @@ Paths Paths::at(const std::string &app0)
     paths.info = app0 + "/info";
     paths.cores = app0 + "/cores";
     paths.media = app0 + "/library";
+    const std::string system = app0 + "/system";
+    paths.firmware_folder = [system](const std::string &) { return system; };
     const std::string content = paths.content;
     /* The folder in content/ named after the platform ("SNES", "PS1", "Saturn"), else
      * content/<platform>. */

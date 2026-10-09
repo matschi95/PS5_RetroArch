@@ -5,6 +5,7 @@
  */
 #include "backends.h"
 
+#include "romm/romm_firmware.h"
 #include "romm/romm_saves.h"
 #include "romm/romm_source.h"
 
@@ -13,7 +14,7 @@ namespace ps5::remote
 const std::vector<Backend> &backends()
 {
     static const std::vector<Backend> all = {
-        {"romm", romm::make_source, romm::make_saves, &romm::pairing},
+        {"romm", romm::make_source, romm::make_firmware, romm::make_saves, &romm::pairing},
     };
     return all;
 }
@@ -42,6 +43,15 @@ std::unique_ptr<Source> make_source(const std::string &type, const Json &setting
         return nullptr;
     }
     return backend->source(settings, error);
+}
+
+std::unique_ptr<FirmwareSource> make_firmware_source(const std::string &type, const Json &settings,
+                                                     std::string *error)
+{
+    const Backend *backend = find_backend(type);
+    if (backend == nullptr || backend->firmware == nullptr)
+        return nullptr;
+    return backend->firmware(settings, error);
 }
 
 std::unique_ptr<SaveStore> make_save_store(const std::string &type, const Json &settings,

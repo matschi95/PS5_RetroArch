@@ -50,47 +50,9 @@ class RommSource final : public Source
     {
         /* The file by its own id, as RomM's feeds give it. */
         const std::string name = file.name.substr(file.name.find_last_of('/') + 1);
-        for (;;)
-        {
-            ps5_scraper::Request request;
-            request.url = client_->url() + "/api/roms/" + file.id + "/files/content/" +
-                          ps5_scraper::url_encode(name);
-            if (!client_->authorization().empty())
-                request.headers.emplace_back("Authorization", client_->authorization());
-            if (offset > 0)
-                request.headers.emplace_back("Range", "bytes=" + std::to_string(offset) + "-");
-            request.stopped = [&receiver] { return receiver.stopped(); };
-            int status = 0;
-            /* 206: from the offset asked for; 200: the whole file. Anything else is an error
-             * page. */
-            request.begin = [&](int code)
-            {
-                status = code;
-                return (code == 200 || code == 206) && receiver.begin(code == 200);
-            };
-            request.sink = [&receiver](const char *data, size_t size)
-            { return receiver.take(data, size); };
-            const ps5_scraper::Response response = Client::http().send(request);
-            /* 416: the file on the server is shorter than what was begun: it starts again. */
-            if (status == 416 && offset > 0 && !receiver.stopped())
-            {
-                offset = 0;
-                continue;
-            }
-            if (status != 200 && status != 206)
-            {
-                *error = status == 0 ? (response.error.empty() ? "The server did not answer"
-                                                               : response.error)
-                                     : client_->status_error(status, "/api/roms");
-                return false;
-            }
-            if (!response.error.empty() || response.cancelled)
-            {
-                *error = !response.error.empty() ? response.error : "The download stopped";
-                return false;
-            }
-            return true;
-        }
+        return client_->stream("/api/roms/" + file.id + "/files/content/" +
+                                   ps5_scraper::url_encode(name),
+                               offset, receiver, error);
     }
 
   private:

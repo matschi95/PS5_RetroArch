@@ -16,12 +16,16 @@
  * (ps5_save_sync_before, patches/series 0117) syncs its save data first, and once its core
  * closed again it goes up (ps5_remote_core_closed); what waits from an earlier start goes
  * on as RetroArch starts (ps5_remote_start). Notices are RetroArch's on-screen messages.
+ *
+ * Firmware (src/remote/firmware.h): as a game's core loads, what its info names and its
+ * system folder lacks comes from the sources that listed it (ps5_remote_core_opening).
  */
 #include "remote_core.h"
 
 #include "../frontend_mode_ps5.h"
 #include "../ps5_game.h"
 #include "../ps5_library.h"
+#include "configuration.h"
 #include "files.h"
 #include "library.h"
 #include "remote.h"
@@ -40,6 +44,7 @@
 #include <queues/message_queue.h>
 #include <unistd.h>
 
+extern "C" const char *ps5_core_system_directory(const char *core, const char *directory);
 extern "C" void runloop_msg_queue_push(const char *msg, size_t len, unsigned prio,
                                        unsigned duration, bool flush, char *title,
                                        enum message_queue_icon icon,
@@ -54,6 +59,9 @@ constexpr unsigned sync_timeout = 15;
 
 /* How long the start waits for a new source's answers. */
 constexpr unsigned start_timeout = 5;
+
+/* The most a core's loading waits for its firmware. */
+constexpr auto firmware_timeout = std::chrono::seconds(20);
 
 bool started = false;
 
@@ -116,12 +124,55 @@ class OffloadWriter final : public Writer
     struct ps5_offload *stream_ = nullptr;
 };
 
+/* An on-screen message; warning: something the player has to see to. */
+void notice(const std::string &text, bool warning)
+{
+    runloop_msg_queue_push(text.c_str(), text.size(), 1, 300, false, nullptr,
+                           MESSAGE_QUEUE_ICON_DEFAULT,
+                           warning ? MESSAGE_QUEUE_CATEGORY_WARNING : MESSAGE_QUEUE_CATEGORY_INFO);
+}
+
+/* A core's system folder as RetroArch gives it to the core (patches/series 0106: the Saturn
+ * core's own); "" when RetroArch's setting is empty (the content's folder then). */
+std::string firmware_folder(const std::string &core)
+{
+    const settings_t *settings = config_get_ptr();
+    const char *system = settings ? settings->paths.directory_system : "";
+    if (!system || !*system)
+        return "";
+    return ps5_core_system_directory(core.c_str(), system);
+}
+
 /* The title's paths, its downloads written by the console's FTP server. */
 Paths title_paths()
 {
     Paths paths = Paths::title();
     paths.writer = [] { return std::unique_ptr<Writer>(new OffloadWriter); };
+    paths.firmware_folder = firmware_folder;
     return paths;
+}
+
+/* What a core's info names and its system folder lacks, from the sources' firmware. */
+void fetch_core_firmware(const char *core_path)
+{
+    std::string name = files::base_name(core_path);
+    if (const size_t dot = name.rfind(".so"); dot != std::string::npos)
+        name.resize(dot);
+    CoreFirmware core;
+    if (!read_core_firmware(Paths::title().info + "/" + name + ".info", &core))
+        return;
+    const std::string folder = firmware_folder(core.core);
+    if (folder.empty() || core.files.empty())
+        return;
+    const auto ends = std::chrono::steady_clock::now() + firmware_timeout;
+    const std::vector<FirmwareOffer> offers = firmware_offers();
+    const FirmwareOutcome outcome = fetch_firmware(
+        core, folder, offers, [ends] { return std::chrono::steady_clock::now() > ends; });
+    if (const std::string text = firmware_notice(outcome, !offers.empty()); !text.empty())
+    {
+        std::fprintf(stderr, "[firmware] %s: %s\n", core.core.c_str(), text.c_str());
+        notice(text, !outcome.failed.empty() || !outcome.missing.empty());
+    }
 }
 
 SaveJobs &save_jobs();
@@ -298,12 +349,8 @@ SaveJobs &save_jobs()
         made->on_notice(
             [](const std::string &text)
             {
-                runloop_msg_queue_push(text.c_str(), text.size(), 1, 300, false, nullptr,
-                                       MESSAGE_QUEUE_ICON_DEFAULT,
-                                       text.find("not synced") != std::string::npos ||
-                                               text.find("too old") != std::string::npos
-                                           ? MESSAGE_QUEUE_CATEGORY_WARNING
-                                           : MESSAGE_QUEUE_CATEGORY_INFO);
+                notice(text, text.find("not synced") != std::string::npos ||
+                                 text.find("too old") != std::string::npos);
             });
         return made;
     }();
@@ -395,8 +442,10 @@ extern "C" void ps5_save_sync_before(const char *content, const char *core, cons
 
 extern "C" void ps5_remote_core_opening(const char *path)
 {
-    if (started && !is_remote_core(path))
-        stop();
+    if (!started || is_remote_core(path))
+        return;
+    stop();
+    fetch_core_firmware(path);
 }
 
 extern "C" void ps5_remote_core_closed(const char *path)

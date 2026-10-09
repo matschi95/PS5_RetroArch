@@ -98,6 +98,30 @@ int main(int argc, char **argv)
                error == "No server address (\"url\") in save-sync.json");
         std::vector<remote::SourceGame> games;
         assert(!romm::parse_page("{\"items\":{}}", &games) && !romm::parse_page("[]", &games));
+        /* Firmware, each with its platform's names; one gone from the server's drive is not. */
+        assert(remote::find_backend("romm")->firmware);
+        std::vector<remote::FirmwareFile> firmware;
+        assert(romm::parse_firmware(
+            "[{\"id\":5,\"platform_id\":2,\"file_name\":\"scph5501.bin\",\"file_size_bytes\":"
+            "524288,\"crc_hash\":\"47b2b88b\",\"md5_hash\":\"490f666e1afb15b7362b406ed1cea246\","
+            "\"sha1_hash\":\"b05def971d8ec59f346f2d9ac21fb742e3eb6917\",\"is_verified\":true,"
+            "\"missing_from_fs\":false},"
+            "{\"id\":6,\"platform_id\":2,\"file_name\":\"gone.bin\",\"missing_from_fs\":true}]",
+            "[{\"id\":2,\"slug\":\"ps\",\"fs_slug\":\"psx\",\"name\":\"PlayStation\"}]",
+            &firmware));
+        assert(firmware.size() == 1 && firmware[0].id == "5" && firmware[0].size == 524288 &&
+               firmware[0].crc32 == "47b2b88b" && firmware[0].verified &&
+               firmware[0].systems == std::vector<std::string>({"psx", "ps", "PlayStation"}));
+        /* RomM before 5.3: the platform by the file's folder. */
+        assert(romm::parse_firmware("[{\"id\":7,\"file_name\":\"BS-X.bin\",\"file_path\":"
+                                    "\"bios/snes\"},{\"id\":8,\"file_name\":\"x.bin\","
+                                    "\"file_path\":\"bios/gb\"}]",
+                                    "[{\"id\":3,\"slug\":\"snes\",\"fs_slug\":\"snes\"}]",
+                                    &firmware));
+        assert(firmware.size() == 2 &&
+               firmware[0].systems == std::vector<std::string>({"snes", "snes"}) &&
+               firmware[1].systems == std::vector<std::string>({"gb"}));
+        assert(!romm::parse_firmware("{}", "[]", &firmware));
     }
 
     /* The list: in pages, signed in by token or password, what is the game kept. */
@@ -183,6 +207,6 @@ int main(int argc, char **argv)
 
     std::puts("romm: addresses, pages and categories, sign-ins, platforms, a cover, files from "
               "their start, a byte on, a server that cannot go on, past their end; a game "
-              "downloaded through the download sources PASS");
+              "downloaded through the download sources, firmware PASS");
     return 0;
 }

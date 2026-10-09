@@ -18,8 +18,9 @@
  *   { "sources": [ { "type": "<type>", "name": "Home", ... } ] }
  *
  * What is kept, in config/remote/: queue.json (the download queue, one for all sources,
- * so it goes on after the title was closed), <source>/catalog.json (each source's game
- * list, so the games are listed at once and without a network) and <source>/covers/.
+ * so it goes on after the title was closed), <source>/catalog.json (each source's game and
+ * firmware lists, so the games are listed at once and without a network) and
+ * <source>/covers/.
  *
  * A download is written to content/.remote-downloads/<source>/<game>/ (by the console's
  * FTP server, Writer) and, once all of the game's files are complete, moved to its place
@@ -33,6 +34,7 @@
  */
 #pragma once
 
+#include "firmware.h"
 #include "source.h"
 
 #include <cstddef>
@@ -70,6 +72,8 @@ struct Paths
     /* RetroArch's playlists, core info and cores, and the shared media library
      * (src/ps5_library.h): where the games are listed (src/remote/library.h). */
     std::string playlists, info, cores, media;
+    /* A core's system folder, where its firmware goes, by its corename (firmware.h). */
+    std::function<std::string(const std::string &core)> firmware_folder;
     /* Makes the writer of a download's file; none: the file is written here. */
     std::function<std::unique_ptr<Writer>()> writer;
     /* The title's: /app0/... (the system folder: src/remote/library.h). */
@@ -233,6 +237,10 @@ std::vector<Download> downloads();
 bool enqueue(const std::string &source, const std::string &id, bool first);
 /* Takes a game out of the queue; what it had downloaded is deleted. */
 bool cancel(const std::string &source, const std::string &id);
+/* Each source's firmware, as its last list said (firmware.h): what a core that lacks some
+ * fetches it from. A source's firmware is listed with its games, and a downloaded game's
+ * platform gets what its cores lack at once. */
+std::vector<FirmwareOffer> firmware_offers();
 /* The game's folder on the console, when it is there ("" else). */
 std::string placed_folder(const std::string &source, const std::string &id);
 /* A game downloaded from a source was deleted from the console: it is the source's again. */

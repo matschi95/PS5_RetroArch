@@ -100,7 +100,8 @@ std::string Client::status_error(int status, const std::string &path) const
             {"/api/saves", "assets.read and assets.write"},
             {"/api/states", "assets.read and assets.write"},
             {"/api/sync", "assets.read and devices.read"},
-            {"/api/devices", "devices.write"}};
+            {"/api/devices", "devices.write"},
+            {"/api/firmware", "firmware.read"}};
         for (const auto &scope : scopes)
             if (path.rfind(scope.first, 0) == 0)
                 return "RomM did not accept the token or password in " + file_ +
@@ -247,6 +248,50 @@ bool Client::fetch(const std::string &path_or_url, uint64_t limit, const Stopped
     return true;
 }
 
+bool Client::stream(const std::string &path, uint64_t offset, Receiver &receiver,
+                    std::string *error) const
+{
+    for (;;)
+    {
+        ps5_scraper::Request request;
+        request.url = url_ + path;
+        if (!authorization_.empty())
+            request.headers.emplace_back("Authorization", authorization_);
+        if (offset > 0)
+            request.headers.emplace_back("Range", "bytes=" + std::to_string(offset) + "-");
+        request.stopped = [&receiver] { return receiver.stopped(); };
+        int status = 0;
+        /* 206: from the offset asked for; 200: the whole file. Anything else is an error page. */
+        request.begin = [&](int code)
+        {
+            status = code;
+            return (code == 200 || code == 206) && receiver.begin(code == 200);
+        };
+        request.sink = [&receiver](const char *data, size_t size)
+        { return receiver.take(data, size); };
+        const ps5_scraper::Response response = http().send(request);
+        /* 416: the file on the server is shorter than what was begun: it starts again. */
+        if (status == 416 && offset > 0 && !receiver.stopped())
+        {
+            offset = 0;
+            continue;
+        }
+        if (status != 200 && status != 206)
+        {
+            *error = status == 0
+                         ? (response.error.empty() ? "The server did not answer" : response.error)
+                         : status_error(status, path);
+            return false;
+        }
+        if (!response.error.empty() || response.cancelled)
+        {
+            *error = !response.error.empty() ? response.error : "The download stopped";
+            return false;
+        }
+        return true;
+    }
+}
+
 bool Client::platform_filter(const Stopped &stopped, unsigned timeout, std::string *filter,
                              std::string *error) const
 {
@@ -318,6 +363,43 @@ std::string normal_url(std::string url)
     if (scheme != "http" && scheme != "https")
         return "";
     return scheme + url.substr(url.find("://"));
+}
+
+bool parse_firmware(const std::string &firmware, const std::string &platforms,
+                    std::vector<FirmwareFile> *files)
+{
+    Json list, known;
+    if (!Json::parse(firmware, &list) || list.kind != Json::array ||
+        !Json::parse(platforms, &known) || known.kind != Json::array)
+        return false;
+    files->clear();
+    for (const Json &item : list.items)
+    {
+        if (item.kind != Json::object || item["missing_from_fs"].yes() ||
+            id_text(item["id"]).empty() || text(item, "file_name").empty())
+            continue;
+        FirmwareFile file;
+        file.id = id_text(item["id"]);
+        file.name = text(item, "file_name");
+        /* Its platform by its id; before RomM 5.3 only its folder tells (bios/<fs_slug>). */
+        const std::string platform = id_text(item["platform_id"]);
+        const std::string folder = files::base_name(text(item, "file_path"));
+        for (const Json &entry : known.items)
+            if (!platform.empty() ? id_text(entry["id"]) == platform
+                                  : !folder.empty() && text(entry, "fs_slug") == folder)
+                for (const char *field : {"fs_slug", "slug", "display_name", "name"})
+                    if (!text(entry, field).empty())
+                        file.systems.push_back(text(entry, field));
+        if (file.systems.empty() && platform.empty() && !folder.empty())
+            file.systems.push_back(folder);
+        file.size = item["file_size_bytes"].whole();
+        file.crc32 = text(item, "crc_hash");
+        file.md5 = text(item, "md5_hash");
+        file.sha1 = text(item, "sha1_hash");
+        file.verified = item["is_verified"].yes();
+        files->push_back(std::move(file));
+    }
+    return true;
 }
 
 bool parse_page(const std::string &text_, std::vector<SourceGame> *games, size_t *listed,

@@ -57,6 +57,9 @@ struct SourceState
     std::string name;
     std::string signature;          /* its entry in sources.json, to see a change */
     std::shared_ptr<Source> source; /* nullptr when the entry is not usable */
+    /* Its firmware (firmware.h) and what its last list said; nullptr when it has none. */
+    std::shared_ptr<FirmwareSource> firmware;
+    std::vector<FirmwareFile> firmware_files;
     std::string error;
     bool refresh_wanted = false;
     bool refreshing = false;
@@ -314,6 +317,7 @@ void save_catalog(const Shared &s, const SourceState &state)
     Json catalog = Json::record();
     catalog.set("signature", Json::of(state.signature));
     catalog.set("games", catalog_games(state.games));
+    catalog.set("firmware", firmware_json(state.firmware_files));
     const std::string folder = source_folder(s, state.key);
     if (!files::make_folders(folder) || !files::write(folder + "/catalog.json", catalog.write()))
         log("could not write the game list of " + state.name);
@@ -330,6 +334,7 @@ void load_catalog(Shared &s, SourceState &state)
     /* A list from another entry (another server, other settings) is not this one's. */
     if (text(catalog, "signature") != state.signature)
         return;
+    state.firmware_files = firmware_files(catalog["firmware"]);
     for (const Json &item : catalog["games"].items)
     {
         Game game;
@@ -481,6 +486,9 @@ void read_sources(Shared &s)
                 std::string error;
                 state->source = make_source(type, entry, &error);
                 state->error = error;
+                std::string firmware_error;
+                if (state->source)
+                    state->firmware = make_firmware_source(type, entry, &firmware_error);
                 load_catalog(s, *state);
                 if (!state->source)
                     log("source " + name + ": " + error);
@@ -816,6 +824,18 @@ void remove_leftovers(const Shared &s)
 
 /* ---- the threads ---- */
 
+/* A source's firmware list; false (logged) when it could not be read: the last one stays.
+ * A token without the scope for it only means no firmware from there. */
+bool list_firmware(FirmwareSource &firmware, const std::string &name,
+                   std::vector<FirmwareFile> *files, const Stopped &stopped, unsigned timeout = 0)
+{
+    std::string error;
+    if (firmware.list(files, &error, stopped, timeout))
+        return true;
+    log(name + ": its firmware is not listed: " + error);
+    return false;
+}
+
 void *list_thread(void *)
 {
     Shared &s = state();
@@ -835,11 +855,16 @@ void *list_thread(void *)
         state->refreshing = true;
         s.listing = true;
         const std::shared_ptr<Source> source = state->source;
-        const std::string key = state->key;
+        const std::shared_ptr<FirmwareSource> firmware = state->firmware;
+        const std::string key = state->key, name = state->name;
         lock.unlock();
         std::vector<SourceGame> listed;
         std::string error;
         const bool read = source->list(&listed, &error, [&s] { return s.halt.load(); });
+        std::vector<FirmwareFile> firmware_listed;
+        const bool firmware_read =
+            read && firmware &&
+            list_firmware(*firmware, name, &firmware_listed, [&s] { return s.halt.load(); });
         std::vector<Game> games;
         for (const SourceGame &from : listed)
         {
@@ -876,8 +901,13 @@ void *list_thread(void *)
                         s.covers.erase(cover);
                     }
         /* A new generation only for a list that is not the one it has. */
-        const bool changed = catalog_games(games) != catalog_games(state->games);
+        bool changed = catalog_games(games) != catalog_games(state->games);
         state->games = std::move(games);
+        if (firmware_read && firmware_json(firmware_listed) != firmware_json(state->firmware_files))
+        {
+            state->firmware_files = std::move(firmware_listed);
+            changed = true;
+        }
         state->online = true;
         state->error.clear();
         state->listed_once = true;
@@ -917,6 +947,16 @@ void *list_thread(void *)
         s.wake.notify_all();
     }
     return nullptr;
+}
+
+/* Each source's firmware, as its last list said, in sources.json's order. */
+std::vector<FirmwareOffer> offers_locked(const Shared &s)
+{
+    std::vector<FirmwareOffer> offers;
+    for (const auto &state : s.sources)
+        if (state->firmware && !state->firmware_files.empty())
+            offers.push_back({state->name, state->firmware, state->firmware_files});
+    return offers;
 }
 
 void *download_thread(void *)
@@ -1021,9 +1061,20 @@ void *download_thread(void *)
             save_queue(s);
             ++s.generation;
             const PlacedNote note = s.placed;
+            const std::vector<FirmwareOffer> offers = offers_locked(s);
             lock.unlock();
             if (note)
                 note(placed);
+            /* What its platform's cores read, while the network is there. */
+            for (const CoreFirmware &core :
+                 platform_firmware(paths.info, paths.cores, game.platform))
+            {
+                const FirmwareOutcome got = fetch_firmware(core, paths.firmware_folder(core.core),
+                                                           offers, [&s] { return s.halt.load(); });
+                if (const std::string notice = firmware_notice(got, !offers.empty());
+                    !notice.empty())
+                    log(core.core + ": " + notice);
+            }
             lock.lock();
         }
         else if (at != s.queue.end())
@@ -1274,6 +1325,10 @@ void list_new(const Paths &paths, unsigned timeout)
         std::vector<SourceGame> listed;
         std::string error;
         const bool read_ = state->source->list(&listed, &error, [] { return false; }, timeout);
+        std::vector<FirmwareFile> firmware;
+        const bool firmware_read =
+            read_ && state->firmware &&
+            list_firmware(*state->firmware, state->name, &firmware, [] { return false; }, timeout);
         std::lock_guard<std::mutex> lock(s.lock);
         /* Not listed_once: the list thread reads it again once RetroArch is up, with the
          * covers. */
@@ -1295,6 +1350,8 @@ void list_new(const Paths &paths, unsigned timeout)
             if (make_game(state->key, from, &game))
                 state->games.push_back(std::move(game));
         }
+        if (firmware_read)
+            state->firmware_files = std::move(firmware);
         save_catalog(s, *state);
         ++s.generation;
     }
@@ -1534,6 +1591,13 @@ bool cancel(const std::string &source, const std::string &id)
     save_queue(s);
     s.wake.notify_all();
     return true;
+}
+
+std::vector<FirmwareOffer> firmware_offers()
+{
+    Shared &s = state();
+    std::lock_guard<std::mutex> lock(s.lock);
+    return offers_locked(s);
 }
 
 std::string placed_folder(const std::string &source, const std::string &id)

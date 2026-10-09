@@ -1,8 +1,8 @@
 /* The download sources (src/remote/), on the host, with a backend of this file's own (the
  * type "fake", in place of src/remote/backends.cpp): which game is which, two sources, the
  * kept lists and queue, downloads going on with a spoilt end, a server that cannot go on, a
- * cancel, a failure, the cleaning of .remote-downloads/, and the playlists, stubs and covers
- * the frontends read. argv[1] is a scratch folder.
+ * cancel, a failure, the cleaning of .remote-downloads/, the playlists, stubs and covers the
+ * frontends read, and the firmware a core's info names. argv[1] is a scratch folder.
  */
 #include "../src/ps5_library.h"
 #include "../src/remote/backends.h"
@@ -34,13 +34,15 @@ namespace
 struct Server
 {
     std::vector<remote::SourceGame> games;
-    std::map<std::string, std::string> files;  /* file id -> bytes */
+    std::vector<remote::FirmwareFile> firmware;
+    std::map<std::string, std::string> files;  /* file id -> bytes (games' and firmware's) */
     std::map<std::string, std::string> covers; /* cover name -> picture */
     bool ignores_range = false;
     std::string list_error;        /* the list fails with this */
     std::string file_error;        /* a file fails with this */
     std::atomic<bool> hold{false}; /* a transfer waits after its first piece until stopped */
     std::atomic<int> lists{0};
+    std::atomic<int> firmware_lists{0};
     std::mutex lock;
     std::vector<uint64_t> offsets; /* each fetch's */
 };
@@ -109,6 +111,29 @@ class FakeSource final : public remote::Source
     std::string url_;
     Server &server_;
 };
+
+class FakeFirmware final : public remote::FirmwareSource
+{
+  public:
+    explicit FakeFirmware(Server &server) : server_(server)
+    {
+    }
+    bool list(std::vector<remote::FirmwareFile> *files, std::string *, const remote::Stopped &,
+              unsigned) override
+    {
+        server_.firmware_lists++;
+        *files = server_.firmware;
+        return true;
+    }
+    bool fetch(const remote::FirmwareFile &file, remote::Receiver &receiver, std::string *) override
+    {
+        const std::string &bytes = server_.files.at(file.id);
+        return receiver.begin(true) && receiver.take(bytes.data(), bytes.size());
+    }
+
+  private:
+    Server &server_;
+};
 } // namespace
 
 /* The test's backends: "fake", at a server of this file's (in place of
@@ -123,6 +148,15 @@ std::unique_ptr<remote::Source> ps5::remote::make_source(const std::string &type
         return nullptr;
     }
     return std::unique_ptr<remote::Source>(new FakeSource(url, *servers[url]));
+}
+
+std::unique_ptr<remote::FirmwareSource>
+ps5::remote::make_firmware_source(const std::string &type, const Json &settings, std::string *)
+{
+    const std::string url = settings["url"].str();
+    if (type != "fake" || !servers.count(url))
+        return nullptr;
+    return std::unique_ptr<remote::FirmwareSource>(new FakeFirmware(*servers[url]));
 }
 
 namespace
@@ -151,12 +185,13 @@ Json read_json(const std::string &path)
     return json;
 }
 
-void core(const std::string &name, const std::string &database, const std::string &extensions)
+void core(const std::string &name, const std::string &database, const std::string &extensions,
+          const std::string &firmware = "")
 {
     write(paths.cores + "/" + name + "_libretro.so", "");
     write(paths.info + "/" + name + "_libretro.info",
           "display_name = \"" + name + "\"\ncorename = \"" + name + "\"\ndatabase = \"" + database +
-              "\"\nsupported_extensions = \"" + extensions + "\"\n");
+              "\"\nsupported_extensions = \"" + extensions + "\"\n" + firmware);
 }
 
 /* Bytes that tell their places apart. */
@@ -192,6 +227,20 @@ std::string crc_of(const std::string &bytes)
     std::snprintf(out, sizeof out, "%08lx",
                   ::crc32(0, reinterpret_cast<const Bytef *>(bytes.data()), uInt(bytes.size())));
     return out;
+}
+
+remote::FirmwareFile firmware(const std::string &id, const std::string &name,
+                              const std::string &system, Server &server, bool verified = false,
+                              const std::string &crc = "")
+{
+    remote::FirmwareFile file;
+    file.id = id;
+    file.name = name;
+    file.systems = {system};
+    file.size = server.files[id].size();
+    file.crc32 = crc.empty() ? crc_of(server.files[id]) : crc;
+    file.verified = verified;
+    return file;
 }
 
 /* Waits until a condition holds, at most a few seconds. */
@@ -354,6 +403,55 @@ static void identity()
     assert(!remote::as_game("s", from, &made)); /* a platform the console does not know */
 }
 
+/* A PlayStation game came: its core's firmware with it, the PlayStation's of the name and
+ * nothing else; and again as the core loads, from the kept lists. */
+static void firmware_checks(const std::string &bios)
+{
+    const std::string system = paths.firmware_folder("mednafen_psx_hw");
+    until([&] { return files::size(system + "/scph5501.bin") >= 0; });
+    assert(read(system + "/scph5501.bin") == bios);
+    assert(files::size(system + "/scph5502.bin") < 0);        /* on no source */
+    assert(files::size(system + "/psx/psxonpsp660.bin") < 0); /* came damaged */
+    assert(files::size(paths.config + "/../escape.bin") < 0);
+
+    remote::CoreFirmware core;
+    assert(remote::read_core_firmware(paths.info + "/mednafen_psx_hw_libretro.info", &core));
+    assert(core.core == "mednafen_psx_hw" && core.platforms == std::vector<std::string>{"psx"});
+    assert(core.files.size() == 3 && core.files[2].optional && !core.files[0].optional);
+    assert(remote::platform_firmware(paths.info, paths.cores, "psx").size() == 1 &&
+           remote::platform_firmware(paths.info, paths.cores, "saturn").empty());
+
+    std::vector<remote::FirmwareOffer> offers = remote::firmware_offers();
+    assert(offers.size() == 2 && offers[0].source == "Home" && offers[0].files.size() == 2);
+    /* As the core loads: nothing lacks but what no source has, nothing is asked for. */
+    remote::FirmwareOutcome outcome = remote::fetch_firmware(core, system, offers, {});
+    assert(outcome.fetched.empty() && outcome.missing == std::vector<std::string>{"scph5502.bin"});
+    assert(outcome.failed.size() == 1 &&
+           outcome.failed[0] == "psxonpsp660.bin: the file came damaged");
+    assert(remote::firmware_notice(outcome, true) ==
+           "BIOS not downloaded: psxonpsp660.bin: the file came damaged. BIOS missing, no source "
+           "has it: scph5502.bin");
+    assert(remote::firmware_notice(outcome, false) ==
+           "BIOS not downloaded: psxonpsp660.bin: the file came damaged");
+    /* Deleted: it comes again; a file of the player's is never written over. */
+    std::remove((system + "/scph5501.bin").c_str());
+    outcome = remote::fetch_firmware(core, system, offers, {});
+    assert(outcome.fetched == std::vector<std::string>{"scph5501.bin"} &&
+           read(system + "/scph5501.bin") == bios);
+    assert(remote::firmware_notice(outcome, true)
+               .rfind("BIOS downloaded from Home: scph5501.bin", 0) == 0);
+    write(system + "/scph5501.bin", "mine");
+    (void)remote::fetch_firmware(core, system, offers, {});
+    assert(read(system + "/scph5501.bin") == "mine");
+    /* No system folder: nothing written anywhere. */
+    std::remove((system + "/scph5501.bin").c_str());
+    assert(remote::fetch_firmware(core, "", offers, {}).fetched.empty());
+    write(system + "/scph5501.bin", "mine");
+    /* The lists are kept: known at the next start without the network. */
+    remote::read(paths);
+    assert(remote::firmware_offers().size() == 2);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -363,7 +461,12 @@ int main(int argc, char **argv)
 
     /* The title: cores for SNES and PlayStation, and the remote core. */
     core("snes9x", "Nintendo - Super Nintendo Entertainment System", "smc|sfc");
-    core("mednafen_psx_hw", "Sony - PlayStation", "cue|chd|m3u");
+    core("mednafen_psx_hw", "Sony - PlayStation", "cue|chd|m3u",
+         "firmware_count = 4\n"
+         "firmware0_path = \"scph5501.bin\"\nfirmware0_opt = \"false\"\n"
+         "firmware1_path = \"scph5502.bin\"\nfirmware1_opt = \"false\"\n"
+         "firmware2_path = \"psx/psxonpsp660.bin\"\nfirmware2_opt = \"true\"\n"
+         "firmware3_path = \"../escape.bin\"\n");
     core("remote", "", "remote");
     const std::string remote_core = paths.cores + "/" PS5_LIBRARY_FETCH_CORE;
     /* A game here, in the player's own SNES playlist (and its folder, SNES), with a field of
@@ -406,6 +509,15 @@ int main(int argc, char **argv)
     };
     office.games[0].ids["igdb"] = "1070";
     office.games[1].cover = "/ct.jpg";
+    /* Firmware: the PlayStation BIOS at home (and the Saturn's of the same name, verified,
+     * which is not the PlayStation core's), a damaged optional one at the office. */
+    const std::string bios = data(512 << 10, 4), saturn_bios = data(1000, 5);
+    home.files["f1"] = bios;
+    home.files["f2"] = saturn_bios;
+    home.firmware = {firmware("f2", "SCPH5501.BIN", "saturn", home, true),
+                     firmware("f1", "scph5501.bin", "psx", home)};
+    office.files["f9"] = data(2000, 6);
+    office.firmware = {firmware("f9", "psxonpsp660.bin", "psx", office, false, "12345678")};
     servers["http://home"] = &home;
     servers["http://office"] = &office;
 
@@ -420,7 +532,7 @@ int main(int argc, char **argv)
 
     /* As the title starts: new sources listed at once. */
     remote::list_new(paths, 5);
-    assert(home.lists == 1 && office.lists == 1);
+    assert(home.lists == 1 && office.lists == 1 && home.firmware_lists == 1);
     remote::list_new(paths, 5); /* listed already: not at the next start */
     assert(home.lists == 1);
     remote::Status status = remote::current();
@@ -514,6 +626,7 @@ int main(int argc, char **argv)
     until([] { return remote::downloads().empty(); });
     assert(remote::placed_folder("home", "3") == paths.content + "/psx/Final Fantasy VII");
     assert(read(paths.content + "/psx/Final Fantasy VII/FF7.bin") == ff7_bin);
+    firmware_checks(bios);
 
     /* At the next start: into the player's own playlist, the rest of it kept, and listed on
      * the sources no more; the cover with it. */
@@ -695,8 +808,9 @@ int main(int argc, char **argv)
     assert(read_json(paths.config + "/written.json")["files"].items.empty());
     assert(files::size(paths.playlists + "/Remote.lpl") < 0);
 
-    std::puts(
-        "remote: identity, lists, titles, playlists and stubs, covers, downloads checked as they come with "
-        "resume, a server that cannot go on, failure, cancel, stop, leftovers, deleting PASS");
+    std::puts("remote: identity, lists, titles, playlists and stubs, covers, downloads checked as "
+              "they come with "
+              "resume, a server that cannot go on, failure, cancel, stop, leftovers, deleting, "
+              "firmware PASS");
     return 0;
 }

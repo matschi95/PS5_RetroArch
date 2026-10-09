@@ -7,9 +7,9 @@
 
 For each RomM version (default: the oldest the save sync takes, romm::minimum_version, the newest
 it was checked with, and one older than the oldest, whose save sync is to be refused), starts a
-RomM in Docker (tools/romm-test/docker-compose.yml) with a few fake SNES games, makes an admin and
-a player with client API tokens, scans the library, and runs tests/romm_live_test.cpp against it
-as the player; then takes it all down again. The first run of a version downloads its image
+RomM in Docker (tools/romm-test/docker-compose.yml) with a few fake SNES games and a BIOS, makes
+an admin and a player with client API tokens, scans the library, and runs
+tests/romm_live_test.cpp against it as the player; then takes it all down again. The first run of a version downloads its image
 (about 1 GB).
 
 Needs Docker with Compose; without it, it says so and is skipped. ROMM_CHECK=0 skips it;
@@ -36,10 +36,11 @@ SCAN = ROOT / "tools/romm-test/scan.py"
 # The newest RomM the save sync was checked with, and one older than minimum_version.
 NEWEST = "5.3.1"
 TOO_OLD = "4.9.0"
-SCOPES = ["platforms.read", "roms.read", "assets.read", "assets.write", "devices.read", "devices.write", "me.read"]
-SOURCES = ["tests/romm_live_test.cpp", "src/remote/remote.cpp", "src/remote/library.cpp", "src/remote/save_config.cpp", "src/remote/files.cpp",
+SCOPES = ["platforms.read", "roms.read", "assets.read", "assets.write", "devices.read", "devices.write", "me.read",
+          "firmware.read"]
+SOURCES = ["tests/romm_live_test.cpp", "src/remote/remote.cpp", "src/remote/firmware.cpp", "src/remote/library.cpp", "src/remote/save_config.cpp", "src/remote/files.cpp",
            "src/remote/backends.cpp", "src/remote/pairing.cpp", "src/remote/stream_check.cpp", "src/remote/save_sync.cpp",
-           "src/remote/romm/romm_client.cpp", "src/remote/romm/romm_source.cpp", "src/remote/romm/romm_saves.cpp",
+           "src/remote/romm/romm_client.cpp", "src/remote/romm/romm_source.cpp", "src/remote/romm/romm_firmware.cpp", "src/remote/romm/romm_saves.cpp",
            "src/scraper_http.cpp"]
 
 # The fake games: two, and a large one (downloaded, stopped part way and gone on with).
@@ -97,6 +98,10 @@ def run_version(version, binary, work):
         with path.open("wb") as out:
             for at in range(0, size, 8 << 20):
                 out.write(os.urandom(min(8 << 20, size - at)))
+    # A BIOS of the platform, which RomM's scan takes as its firmware.
+    bios = library / "bios/snes/BS-X.bin"
+    bios.parent.mkdir(parents=True, exist_ok=True)
+    bios.write_bytes(os.urandom(1 << 20))
     port = free_port()
     env = dict(os.environ, ROMM_VERSION=version, ROMM_PORT=str(port), ROMM_LIBRARY=str(library))
     compose = ["docker", "compose", "-p", project, "-f", str(COMPOSE)]

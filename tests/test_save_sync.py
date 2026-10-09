@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = ['src/remote/save_sync.cpp', 'src/remote/save_jobs.cpp', 'src/remote/save_config.cpp', 'src/remote/remote.cpp',
+SOURCES = ['src/remote/save_sync.cpp', 'src/remote/save_jobs.cpp', 'src/remote/save_config.cpp', 'src/remote/remote.cpp', 'src/remote/firmware.cpp',
            'src/remote/library.cpp', 'src/remote/files.cpp', 'src/remote/stream_check.cpp',
            'src/remote/romm/romm_saves.cpp', 'src/remote/romm/romm_client.cpp', 'src/scraper_http.cpp']
 
