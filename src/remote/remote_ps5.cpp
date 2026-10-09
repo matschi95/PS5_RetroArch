@@ -26,6 +26,7 @@
 #include "library.h"
 #include "remote.h"
 #include "save_config.h"
+#include "pairing.h"
 #include "save_jobs.h"
 #include "ui/remote_ui.h"
 
@@ -230,6 +231,41 @@ class TitleServices final : public ui::Services
     {
         save_jobs().end();
     }
+    ui::SaveSetup save_setup() override
+    {
+        const std::string config = Paths::title().config;
+        const SaveConfig read = read_save_config(config + "/save-sync.json");
+        ui::SaveSetup setup;
+        setup.readable = read.readable;
+        setup.error = read.error;
+        setup.type = read.type;
+        setup.url = read.settings["url"].str();
+        setup.user = read.settings["__server_user"].str();
+        setup.automatic = read.automatic;
+        setup.states = read.states;
+        setup.waiting = save_jobs().pending().size();
+        setup.servers = pair_servers(config + "/sources.json");
+        return setup;
+    }
+    void pair_start(const PairServer &server) override
+    {
+        pairing_run().start(server.type, server.settings);
+    }
+    PairingRun::View pairing() override
+    {
+        return pairing_run().view();
+    }
+    void pair_cancel() override
+    {
+        pairing_run().cancel();
+    }
+    bool unlink(std::string *error) override
+    {
+        if (set_save_server(Paths::title().config + "/save-sync.json", Json::record()))
+            return true;
+        *error = "save-sync.json could not be written";
+        return false;
+    }
     double now() override
     {
         return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch())
@@ -237,6 +273,18 @@ class TitleServices final : public ui::Services
     }
 
   private:
+    PairingRun &pairing_run()
+    {
+        if (!pairing_)
+        {
+            const std::string config = Paths::title().config;
+            pairing_.reset(new PairingRun([this] { return now(); }, config + "/save-sync.json",
+                                          config + "/save-sync"));
+        }
+        return *pairing_;
+    }
+
+    std::unique_ptr<PairingRun> pairing_;
     SyncGame syncing_;     /* the game whose save data syncs before it starts from here */
     bool waiting_ = false; /* its sync is still to start */
 };

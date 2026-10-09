@@ -6,6 +6,8 @@
  */
 #include "remote_ui.h"
 
+#include "qrcodegen/qrcodegen.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <ctime>
@@ -823,12 +825,242 @@ class GoneScreen final : public Screen
     std::string name_;
     bool finished_ = false;
 };
+/* ---------------------------------------------------------------- Save sync */
+/* A code as it is easier to read: in two halves. */
+std::string spaced(const std::string &code)
+{
+    return code.size() == 8 ? code.substr(0, 4) + " " + code.substr(4) : code;
+}
+
+/* A QR code of `text` in a white square at x, y of `size` pixels (its quiet zone in it). */
+void draw_qr(Canvas &c, int x, int y, int size, const std::string &text)
+{
+    std::vector<uint8_t> scratch(qrcodegen_BUFFER_LEN_MAX), code(qrcodegen_BUFFER_LEN_MAX);
+    c.fill(x, y, size, size, 0xffffff);
+    if (!qrcodegen_encodeText(text.c_str(), scratch.data(), code.data(), qrcodegen_Ecc_LOW,
+                              qrcodegen_VERSION_MIN, 10, qrcodegen_Mask_AUTO, true))
+        return;
+    const int modules = qrcodegen_getSize(code.data());
+    const int scale = size / (modules + 8);
+    const int start = (size - modules * scale) / 2;
+    for (int row = 0; row < modules; row++)
+        for (int column = 0; column < modules; column++)
+            if (qrcodegen_getModule(code.data(), column, row))
+                c.fill(x + start + column * scale, y + start + row * scale, scale, scale, 0x000000);
+}
+
+/* Pairing with a server: the QR code of its approval page at the left, what to do at the
+ * right, until the player approved it on the phone. */
+class PairingDialog
+{
+  public:
+    PairingDialog(Services &services, PairServer server)
+        : services_(services), server_(std::move(server))
+    {
+        services_.pair_start(server_);
+    }
+    /* False once it is closed. */
+    bool input(uint32_t pressed)
+    {
+        const PairingRun::View view = services_.pairing();
+        const bool over =
+            view.stage != PairingRun::View::starting && view.stage != PairingRun::View::waiting;
+        if (pressed & circle)
+        {
+            services_.pair_cancel();
+            return false;
+        }
+        if ((pressed & cross) && over)
+        {
+            if (view.stage == PairingRun::View::approved)
+                return false;
+            services_.pair_start(server_); /* tried again */
+        }
+        return true;
+    }
+    void draw(Canvas &c) const
+    {
+        const PairingRun::View view = services_.pairing();
+        panel(c, "Pair with " + server_.name, server_.url);
+        int y = panel_y + 136;
+        switch (view.stage)
+        {
+        case PairingRun::View::waiting:
+        {
+            draw_qr(c, inner_x, y - 16, 220, view.address);
+            const int x = inner_x + 250, width = inner_width - 250;
+            int at = c.block(x, y,
+                             "Scan the code with your phone, or open the address, sign in as "
+                             "yourself and approve:",
+                             color::text, width);
+            c.text(x, at + 10, spaced(view.code), color::title, 4, width);
+            at = c.block(x, at + 70, view.address, color::meta, width);
+            const int left = std::max(0, int(view.expires - services_.now()));
+            char ends[48];
+            std::snprintf(ends, sizeof ends, "The code works for %d:%02d.", left / 60, left % 60);
+            c.text(x, at + 14, ends, color::meta, 2, width);
+            hints(c, "Circle: cancel");
+            return;
+        }
+        case PairingRun::View::approved:
+            c.text(inner_x, y, "Paired", color::good);
+            c.block(inner_x, y + 34,
+                    "The save data syncs as " + (view.user.empty() ? "you" : view.user) +
+                        " now: before and after each game.",
+                    color::text, inner_width);
+            hints(c, "Cross: done");
+            return;
+        case PairingRun::View::denied:
+        case PairingRun::View::expired:
+        case PairingRun::View::failed:
+            c.text(inner_x, y,
+                   view.stage == PairingRun::View::denied    ? "The pairing was refused"
+                   : view.stage == PairingRun::View::expired ? "The code ran out"
+                                                             : "The pairing did not work",
+                   color::warning);
+            if (!view.error.empty())
+                c.block(inner_x, y + 34, view.error, color::meta, inner_width);
+            hints(c, "Cross: try again    Circle: back");
+            return;
+        default:
+            c.text(inner_x, y, "Asking the server for a code...", color::text);
+            hints(c, "Circle: cancel");
+            return;
+        }
+    }
+
+  private:
+    Services &services_;
+    PairServer server_;
+};
+
+/* Save sync: the server the save data is kept on, pairing with one, unlinking it. */
+class SaveSyncScreen final : public Screen
+{
+  public:
+    explicit SaveSyncScreen(Services &services) : services_(services)
+    {
+        setup_ = services_.save_setup();
+    }
+    void input(uint32_t pressed) override
+    {
+        if (pairing_)
+        {
+            if (!pairing_->input(pressed))
+            {
+                pairing_.reset();
+                setup_ = services_.save_setup();
+            }
+            return;
+        }
+        const size_t rows = setup_.servers.size();
+        if (rows > 0 && (pressed & up))
+            focus_ = (focus_ + rows - 1) % rows;
+        if (rows > 0 && (pressed & down))
+            focus_ = (focus_ + 1) % rows;
+        if (pressed & ~uint32_t(square))
+            armed_ = false;
+        if (pressed & circle)
+            finished_ = true;
+        else if ((pressed & cross) && rows > 0)
+            pairing_.reset(new PairingDialog(services_, setup_.servers[focus_]));
+        else if ((pressed & square) && !setup_.type.empty())
+        {
+            /* A first Square asks; a second unlinks. */
+            if (!armed_)
+                armed_ = true;
+            else
+            {
+                armed_ = false;
+                std::string error;
+                const bool done = services_.unlink(&error);
+                message_.say(services_,
+                             done ? "Unlinked: the save data stays on the console only."
+                                  : "Could not unlink: " + error,
+                             !done);
+                setup_ = services_.save_setup();
+            }
+        }
+    }
+    void draw(Canvas &c) override
+    {
+        if (pairing_)
+        {
+            pairing_->draw(c);
+            return;
+        }
+        panel(c, "Save sync",
+              "Your saves and save states on a server, synced before and after each game.");
+        int y = panel_y + 140;
+        if (!setup_.readable)
+            y = c.block(inner_x, y, setup_.error + ": fix it over FTP.", color::warning,
+                        inner_width);
+        else if (setup_.type.empty())
+            y = c.block(inner_x, y,
+                        "Not set up: pair with a server below, or fill in "
+                        "config/remote/save-sync.json over FTP.",
+                        color::text, inner_width);
+        else
+        {
+            c.text(inner_x, y, "Server: " + setup_.url, color::title, 2, inner_width);
+            if (!setup_.user.empty())
+                c.text(inner_x, y + 26, "Signed in as " + setup_.user, color::text, 2, inner_width);
+            std::string line = setup_.automatic ? "Before and after each game" : "Turned off";
+            if (setup_.automatic)
+                line += setup_.states ? ", with the save states" : ", without the save states";
+            c.text(inner_x, y + 52, line, color::meta, 2, inner_width);
+            if (setup_.waiting > 0)
+                c.text(inner_x, y + 78,
+                       std::to_string(setup_.waiting) + " game(s) waiting to go up", color::meta, 2,
+                       inner_width);
+            y += 110;
+        }
+        y += 12;
+        if (setup_.servers.empty())
+            c.block(inner_x, y,
+                    "Pairing needs a RomM server among the download sources (sources.json).",
+                    color::meta, inner_width);
+        for (size_t i = 0; i < setup_.servers.size(); i++)
+        {
+            if (i == focus_)
+                c.fill(inner_x - 12, y - 6, inner_width + 24, 32, color::focus);
+            c.text(inner_x, y,
+                   "Pair with " + setup_.servers[i].name + " (" + setup_.servers[i].url + ")",
+                   color::title, 2, inner_width);
+            y += 36;
+        }
+        if (armed_)
+            c.text(inner_x, panel_y + panel_height - 70,
+                   "Square again unlinks the server; the save data stays.", color::warning, 2,
+                   inner_width);
+        else
+            message_.draw(c, services_);
+        std::string keys = setup_.servers.empty() ? "" : "Cross: pair    ";
+        if (!setup_.type.empty())
+            keys += "Square twice: unlink    ";
+        hints(c, keys + "Circle: back");
+    }
+    bool finished() const override
+    {
+        return finished_;
+    }
+
+  private:
+    Services &services_;
+    SaveSetup setup_;
+    std::unique_ptr<PairingDialog> pairing_;
+    size_t focus_ = 0;
+    bool armed_ = false, finished_ = false;
+    Message message_;
+};
 } // namespace
 
 std::unique_ptr<Screen> open(const Stub &stub, Services &services)
 {
     if (stub.screen == "downloads")
         return std::unique_ptr<Screen>(new DownloadsScreen(services));
+    if (stub.screen == "savesync")
+        return std::unique_ptr<Screen>(new SaveSyncScreen(services));
     if (stub.games.empty())
         return std::unique_ptr<Screen>(new GoneScreen(stub.name));
     return std::unique_ptr<Screen>(new DownloadScreen(stub, services));

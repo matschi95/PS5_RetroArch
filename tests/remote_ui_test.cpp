@@ -141,6 +141,33 @@ class SampleServices final : public ui::Services
         synced.push_back("end");
         sync = remote::SyncView();
     }
+    ui::SaveSetup save_setup() override
+    {
+        return setup;
+    }
+    void pair_start(const remote::PairServer &server) override
+    {
+        paired.push_back("start " + server.name);
+        pairing_view = remote::PairingRun::View();
+        pairing_view.stage = remote::PairingRun::View::starting;
+    }
+    remote::PairingRun::View pairing() override
+    {
+        return pairing_view;
+    }
+    void pair_cancel() override
+    {
+        paired.push_back("cancel");
+        pairing_view = remote::PairingRun::View();
+    }
+    bool unlink(std::string *) override
+    {
+        paired.push_back("unlink");
+        setup.type.clear();
+        setup.url.clear();
+        setup.user.clear();
+        return true;
+    }
     double now() override
     {
         return clock;
@@ -149,7 +176,9 @@ class SampleServices final : public ui::Services
     remote::Status status_;
     std::vector<remote::Title> titles_;
     std::vector<remote::Download> downloads_;
-    std::vector<std::string> enqueued, cancelled, removed, played, synced;
+    std::vector<std::string> enqueued, cancelled, removed, played, synced, paired;
+    ui::SaveSetup setup;
+    remote::PairingRun::View pairing_view;
     bool sync_on = false;
     remote::SyncView sync;
     std::string placed_id = "71";
@@ -381,8 +410,57 @@ int main(int argc, char **argv)
         auto screen = ui::open(stub, services);
         shot(*screen, "24-no-source");
     }
+    /* Save sync: not set up, paired with a source's server by a QR code, then unlinked by
+     * Square twice. */
+    {
+        SampleServices services;
+        remote::PairServer home;
+        home.name = "Home";
+        home.url = "http://192.168.1.20:3000";
+        home.type = "romm";
+        services.setup.servers = {home};
+        remote::Stub stub;
+        stub.screen = "savesync";
+        auto screen = ui::open(stub, services);
+        shot(*screen, "25-save-sync");
+        screen->input(ui::cross);
+        assert(services.paired.size() == 1 && services.paired[0] == "start Home");
+        shot(*screen, "26-pairing-starting");
+        services.pairing_view.stage = remote::PairingRun::View::waiting;
+        services.pairing_view.code = "K7Q2XW9P";
+        services.pairing_view.address = "http://192.168.1.20:3000/pair/device?code=K7Q2XW9P";
+        services.pairing_view.expires = services.clock + 581;
+        shot(*screen, "27-pairing");
+        assert(drawn(100, 380));  /* the QR code */
+        screen->input(ui::cross); /* nothing while it waits */
+        assert(services.paired.size() == 1);
+        services.pairing_view.stage = remote::PairingRun::View::approved;
+        services.pairing_view.user = "alex";
+        services.setup.type = "romm";
+        services.setup.url = home.url;
+        services.setup.user = "alex";
+        shot(*screen, "28-paired");
+        screen->input(ui::cross);
+        shot(*screen, "29-save-sync-set");
+        screen->input(ui::square);
+        screen->input(0);
+        shot(*screen, "30-unlink");
+        assert(services.paired.size() == 1);
+        screen->input(ui::square);
+        assert(services.paired.back() == "unlink");
+        /* A refused one: tried again; Circle cancels. */
+        screen->input(ui::cross);
+        services.pairing_view.stage = remote::PairingRun::View::denied;
+        shot(*screen, "31-pairing-refused");
+        screen->input(ui::cross);
+        assert(services.paired.back() == "start Home");
+        screen->input(ui::circle);
+        assert(services.paired.back() == "cancel" && !screen->finished());
+        screen->input(ui::circle);
+        assert(screen->finished());
+    }
     std::puts("remote ui: the source dialog, the download dialog (waiting, downloading, failed, "
               "starting), the save sync before a game (a conflict, not synced), a game gone, "
-              "Downloads (sources, queue, deleting) PASS");
+              "Downloads (sources, queue, deleting), Save sync (pairing, unlinking) PASS");
     return 0;
 }

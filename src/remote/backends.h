@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include "pairing.h"
 #include "save_store.h"
 #include "source.h"
 
@@ -33,6 +34,9 @@ struct Backend
      * `folder`; nullptr: it cannot keep save data. */
     std::unique_ptr<SaveStore> (*saves)(const Json &settings, const std::string &folder,
                                         std::string *error);
+    /* Its save store's entry signed in by pairing (pairing.h); nullptr: only by what is typed
+     * into save-sync.json. */
+    const Pairing *pairing;
 };
 
 /* All of them, in the order the menu offers them. */

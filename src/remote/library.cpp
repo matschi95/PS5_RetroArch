@@ -8,6 +8,7 @@
 
 #include "../ps5_library.h"
 #include "files.h"
+#include "save_config.h"
 
 #include <algorithm>
 #include <map>
@@ -309,7 +310,9 @@ void sync(const Paths &paths)
     read(paths);
     const Status status = current();
     std::vector<std::string> written_before = read_written(paths);
-    if (!status.configured && written_before.empty() &&
+    /* The save sync set up: its screen is there without download sources too. */
+    const bool saves = !read_save_config(paths.config + "/save-sync.json").type.empty();
+    if (!status.configured && !saves && written_before.empty() &&
         files::names(paths.config + "/placed").empty() &&
         files::names(paths.config + "/removed").empty())
         return; /* nothing set up, nothing to take back */
@@ -459,13 +462,19 @@ void sync(const Paths &paths)
         written.insert(playlist);
     }
 
-    /* The remote core's own screens. */
+    /* The remote core's own screens: Downloads with download sources, Save sync with those
+     * (to pair with one of them) or a server of the save sync. */
+    std::vector<std::pair<const char *, const char *>> own;
     if (status.configured)
+        own.emplace_back("downloads", "Downloads");
+    if (status.configured || saves)
+        own.emplace_back("savesync", "Save sync");
+    if (!own.empty())
     {
         const std::string screens = paths.config + "/screens";
         files::make_folders(screens);
         std::vector<Json> entries;
-        for (const auto &screen : {std::pair<const char *, const char *>{"downloads", "Downloads"}})
+        for (const auto &screen : own)
         {
             Json stub = Json::record();
             stub.set("screen", Json::of(screen.first));

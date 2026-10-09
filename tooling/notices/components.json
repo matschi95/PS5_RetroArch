@@ -859,7 +859,7 @@
         "path": ".",
         "remote": "https://github.com/mihawk-99/PS5_RetroArch"
       },
-      "modifications": "Unmodified upstream C source vendored in third_party/qrcodegen; upstream URL, version and SHA-256 digests in source.json. Shared runtime WebUI QR wrapper in src/ps5_webui_qr.c."
+      "modifications": "Unmodified upstream C source vendored in third_party/qrcodegen; upstream URL, version and SHA-256 digests in source.json. Shared runtime WebUI QR wrapper in src/ps5_webui_qr.c; the save sync's pairing code in the remote core (src/remote/ui/remote_ui.cpp)."
     },
     {
       "id": "proton-touchpad",

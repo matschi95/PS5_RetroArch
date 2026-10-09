@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = ['src/remote/remote.cpp', 'src/remote/library.cpp', 'src/remote/files.cpp', 'src/remote/stream_check.cpp']
+SOURCES = ['src/remote/remote.cpp', 'src/remote/library.cpp', 'src/remote/save_config.cpp', 'src/remote/files.cpp', 'src/remote/stream_check.cpp']
 
 
 class Remote(unittest.TestCase):

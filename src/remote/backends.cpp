@@ -13,7 +13,7 @@ namespace ps5::remote
 const std::vector<Backend> &backends()
 {
     static const std::vector<Backend> all = {
-        {"romm", romm::make_source, romm::make_saves},
+        {"romm", romm::make_source, romm::make_saves, &romm::pairing},
     };
     return all;
 }

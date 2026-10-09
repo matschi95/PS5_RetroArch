@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tests'))
-from test_remote_ui import RETROARCH, SOURCES  # noqa: E402
+from test_remote_ui import INCLUDES, SOURCES, c_objects  # noqa: E402
 
 WIDTH, HEIGHT = 960, 540
 
@@ -40,11 +40,10 @@ def main():
     out = Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as td:
-        library = str(Path(td) / 'ps5_library.o')
-        subprocess.run(['cc', '-std=c11', '-O2', '-c', 'src/ps5_library.c', '-o', library], cwd=ROOT, check=True)
+        objects = c_objects(td)
         binary = str(Path(td) / 'remote-ui-test')
-        subprocess.run(['c++', '-std=c++20', '-O2', '-fno-exceptions', '-fno-rtti', '-pthread', '-Isrc',
-                        '-I' + str(RETROARCH), 'tests/remote_ui_test.cpp', *SOURCES, library, '-lz', '-o', binary],
+        subprocess.run(['c++', '-std=c++20', '-O2', '-fno-exceptions', '-fno-rtti', '-pthread', *INCLUDES,
+                        'tests/remote_ui_test.cpp', *SOURCES, *objects, '-lz', '-o', binary],
                        cwd=ROOT, check=True)
         subprocess.run([binary, td], cwd=ROOT, check=True)
         for frame in sorted(Path(td).glob('*.rgb')):

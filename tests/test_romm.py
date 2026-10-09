@@ -8,7 +8,7 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = ['src/remote/remote.cpp', 'src/remote/library.cpp', 'src/remote/files.cpp', 'src/remote/stream_check.cpp', 'src/remote/backends.cpp',
+SOURCES = ['src/remote/remote.cpp', 'src/remote/library.cpp', 'src/remote/save_config.cpp', 'src/remote/files.cpp', 'src/remote/stream_check.cpp', 'src/remote/backends.cpp',
            'src/remote/romm/romm_source.cpp', 'src/remote/romm/romm_client.cpp', 'src/remote/romm/romm_saves.cpp', 'src/scraper_http.cpp']
 
 

@@ -94,6 +94,11 @@ std::string save_version(const Json &save)
     return !hash.empty() ? hash : id_of(save) + "@" + text(save, "updated_at");
 }
 
+/* What the save sync asks for: the games, their save data, this console as a device, and the
+ * user's name for the menu. */
+const char *const scopes[] = {"platforms.read", "roms.read",     "assets.read", "assets.write",
+                              "devices.read",   "devices.write", "me.read"};
+
 class RommSaves final : public SaveStore
 {
   public:
@@ -482,7 +487,122 @@ class RommSaves final : public SaveStore
     std::string confirm_; /* the server's save downloaded, to be taken as this console's */
     std::string confirm_hash_;
 };
+/* An entry asked of without a sign-in: its address only. */
+std::unique_ptr<Client> unsigned_client(const Json &settings, std::string *error)
+{
+    Json entry = settings.kind == Json::object ? settings : Json::record();
+    for (const char *key : {"token", "username", "password"})
+        entry.erase(key);
+    return Client::make(entry, "save-sync.json", error);
+}
+
+bool pair_start(const Json &settings, const std::string &folder, PairingStart *start,
+                std::string *error, const Stopped &stopped)
+{
+    std::unique_ptr<Client> client = unsigned_client(settings, error);
+    if (!client)
+        return false;
+    Json payload = Json::record();
+    payload.set("client_device_identifier", Json::of("ps5-retroarch-" + console_id(folder)));
+    payload.set("name", Json::of("PS5 RetroArch"));
+    payload.set("client", Json::of("PS5-RetroArch"));
+    payload.set("platform", Json::of("ps5"));
+    Json &wanted = payload.set("requested_scopes", Json::list());
+    for (const char *scope : scopes)
+        wanted.push(Json::of(scope));
+    Client::Answer answer;
+    if (!client->send("POST", "/api/auth/device/init", payload.write(), &answer, error, stopped))
+        return false;
+    if (answer.status == 404 || answer.status == 405)
+    {
+        *error = std::string("Pairing needs RomM ") + minimum_version + " or newer";
+        return false;
+    }
+    Json made;
+    Json::parse(answer.body, &made);
+    if ((answer.status != 200 && answer.status != 201) || text(made, "device_code").empty())
+    {
+        *error = detail(*client, answer, "/api/auth");
+        return false;
+    }
+    start->device_code = text(made, "device_code");
+    start->user_code = text(made, "user_code");
+    start->address = client->url() + text(made, "verification_path_complete");
+    /* RomM's default when a server does not say (ten minutes). */
+    start->expires_in = number(made, "expires_in") > 0 ? int(number(made, "expires_in")) : 600;
+    start->interval = std::max(1, int(number(made, "interval")));
+    return true;
+}
+
+PairingResult pair_poll(const Json &settings, const std::string &folder, const PairingStart &start,
+                        const Stopped &stopped)
+{
+    PairingResult result;
+    std::unique_ptr<Client> client = unsigned_client(settings, &result.error);
+    if (!client)
+        return result;
+    Json payload = Json::record();
+    payload.set("device_code", Json::of(start.device_code));
+    Client::Answer answer;
+    if (!client->send("POST", "/api/auth/device/token", payload.write(), &answer, &result.error,
+                      stopped))
+        return result;
+    Json body;
+    Json::parse(answer.body, &body);
+    if (answer.status == 400)
+    {
+        const std::string why = text(body, "detail");
+        if (why == "authorization_pending" || why == "slow_down")
+        {
+            result.state = PairingState::pending;
+            /* slow_down: 5 s more than the interval used so far. */
+            result.interval = start.interval + (why == "slow_down" ? 5 : 0);
+        }
+        else if (why == "access_denied")
+            result.state = PairingState::denied;
+        else if (why == "expired_token")
+            result.state = PairingState::expired;
+        else
+            result.error = detail(*client, answer, "/api/auth");
+        return result;
+    }
+    if (answer.status != 200 || text(body, "access_token").empty())
+    {
+        result.error = detail(*client, answer, "/api/auth");
+        return result;
+    }
+    /* Signed in: the token is bound to the device RomM made for this console, which the save
+     * sync then is (RommSaves::device finds it kept), and says whose it is. */
+    const std::string token = text(body, "access_token");
+    Json entry = Json::record();
+    entry.set("token", Json::of(token));
+    entry.set("url", Json::of(client->url()));
+    std::string ignored;
+    std::unique_ptr<Client> signed_in = Client::make(entry, "save-sync.json", &ignored);
+    Client::Answer me;
+    if (signed_in && signed_in->send(nullptr, "/api/users/me", {}, &me, &ignored, stopped) &&
+        me.status == 200)
+    {
+        Json user;
+        Json::parse(me.body, &user);
+        result.user = text(user, "username");
+    }
+    Json kept_state = Json::record();
+    kept_state.set("url", Json::of(client->url()));
+    kept_state.set("user", Json::of(result.user));
+    kept_state.set("device_id", Json::of(text(body, "device_id")));
+    files::make_folders(folder);
+    (void)files::write(folder + "/romm-device.json", kept_state.write(true));
+    result.state = PairingState::approved;
+    result.entry = Json::record();
+    result.entry.set("type", Json::of("romm"));
+    result.entry.set("url", Json::of(client->url()));
+    result.entry.set("token", Json::of(token));
+    return result;
+}
 } // namespace
+
+const Pairing pairing{pair_start, pair_poll};
 
 std::unique_ptr<SaveStore> make_saves(const Json &settings, const std::string &folder,
                                       std::string *error)

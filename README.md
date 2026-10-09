@@ -267,8 +267,12 @@ server, or another user of the same one, works as well. RomM 5.0 or newer keeps 
 (as RomM keeps RetroArch's: the save in the slot *autosave* of the core, the save states
 by their file names); each kind of server is a backend (`src/remote/save_store.h`).
 
-- **Set up:** the title writes `config/remote/save-sync.json`; fill in the server over
-  FTP:
+- **Pair:** the playlist *Remote* has **Save sync**: choose one of your download
+  sources' RomM servers, scan the QR code with your phone (or open the address), sign
+  in as yourself and approve the code. The console gets a sign-in of its own; nothing
+  is typed. **Square** twice unlinks the server.
+- **Or set up by hand:** the title writes `config/remote/save-sync.json`; fill in the
+  server over FTP:
   ```json
   { "version": 1, "auto": true, "states": true,
     "type": "romm", "url": "http://192.168.1.20:3000", "token": "rmm_..." }

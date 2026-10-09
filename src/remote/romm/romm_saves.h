@@ -22,6 +22,7 @@
  */
 #pragma once
 
+#include "../pairing.h"
 #include "../save_store.h"
 
 #include <cstdint>
@@ -36,6 +37,11 @@ inline constexpr char minimum_version[] = "5.0.0";
 
 std::unique_ptr<SaveStore> make_saves(const Json &settings, const std::string &folder,
                                       std::string *error);
+
+/* Pairing (pairing.h) by RomM's device authorization (RomM 5.0 and newer): the code is approved
+ * on the server's page /pair/device, signed in as the player's user; the console gets a client
+ * API token bound to a device of its own, which the save sync then is. */
+extern const Pairing pairing;
 
 /* ---- the parts, for tests ---- */
 /* A time as RomM writes it ("2026-10-08T12:34:56.123456+00:00", "...Z", or without a zone:
