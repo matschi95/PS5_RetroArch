@@ -178,6 +178,7 @@ int main(int argc, char **argv)
         shot(*screen, "11-waiting");
         services.downloads_[0].state = remote::State::downloading;
         services.downloads_[0].done = 200000;
+        services.downloads_[0].rate = 3500000;
         shot(*screen, "12-downloading");
         assert(drawn(230, 250)); /* the bar */
         /* Circle: it goes on in the background. */
@@ -229,6 +230,7 @@ int main(int argc, char **argv)
         services.downloads_[0].state = remote::State::downloading;
         services.downloads_[0].done = 1073741824ull;
         services.downloads_[0].total = 2147483648ull;
+        services.downloads_[0].rate = 12582912;
         services.enqueue("home", "2", false);
         services.downloads_[1].state = remote::State::failed;
         services.downloads_[1].error = "Not enough free space";

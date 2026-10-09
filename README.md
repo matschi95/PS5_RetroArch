@@ -243,6 +243,11 @@ backend (`src/remote/source.h`), and several servers can be set up at once.
   `Saturn`...), else `content/<system>/`, a folder per game with the server's files,
   so a disc game keeps its `.cue`, `.bin` and `.m3u` together. A downloaded game moves
   into the system's own playlist at the next start.
+- **Written by the console's FTP server:** a title that writes gigabytes itself gets
+  slower and slower, while an FTP server on the console (ftpsrv, etaHEN's...), another
+  process, keeps its speed. So downloads need one running; without one they fail and
+  say so. The title finds it and the folder it sees by itself. **Downloads** shows the
+  speed and the time left.
 - **Interrupted downloads:** files are downloaded to `content/.remote-downloads/` and
   moved into place once all of the game is there, so a game's folder only ever holds a
   whole game. A download stops while a game runs and when the title closes, and goes on

@@ -21,8 +21,9 @@
  * so it goes on after the title was closed), <source>/catalog.json (each source's game
  * list, so the games are listed at once and without a network) and <source>/covers/.
  *
- * A download is written to content/.remote-downloads/<source>/<game>/ and, once all of
- * the game's files are complete, moved to its place at once: <system folder>/<game>/,
+ * A download is written to content/.remote-downloads/<source>/<game>/ (by the console's
+ * FTP server, Writer) and, once all of the game's files are complete, moved to its place
+ * at once: <system folder>/<game>/,
  * the files as they are on the source, so the system folder only ever holds whole
  * games. One that stopped (the title closed, a game started, the network went away)
  * goes on from where it was, its last 4 MB fetched again in case of a power cut;
@@ -38,11 +39,27 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace ps5::remote
 {
+/* Where a download's bytes are written: a file from a byte on, as a stream. The title's go
+ * through the console's FTP server (src/remote/remote_ps5.cpp): written from a title, the
+ * drive slows down to 2 MiB/s once the title's first gigabyte or so is written, while a
+ * server in another process keeps its speed. With none set, the file is written here. */
+class Writer
+{
+  public:
+    virtual ~Writer() = default;
+    /* Cuts the file at `offset` (it is made when missing) and writes on from there. */
+    virtual bool open(const std::string &path, uint64_t offset, std::string *error) = 0;
+    virtual bool write(const void *data, size_t size, std::string *error) = 0;
+    /* All of it is in the file. */
+    virtual bool finish(std::string *error) = 0;
+};
+
 struct Paths
 {
     std::string config;    /* config/remote: sources.json, queue.json, <source>/ */
@@ -53,6 +70,8 @@ struct Paths
     /* RetroArch's playlists, core info and cores, and the shared media library
      * (src/ps5_library.h): where the games are listed (src/remote/library.h). */
     std::string playlists, info, cores, media;
+    /* Makes the writer of a download's file; none: the file is written here. */
+    std::function<std::unique_ptr<Writer>()> writer;
     /* The title's: /app0/... (the system folder: src/remote/library.h). */
     static Paths title();
     /* The same under another folder than /app0 (the tests'). */

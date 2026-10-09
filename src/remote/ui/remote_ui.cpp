@@ -38,6 +38,26 @@ std::string size_text(uint64_t bytes)
     return out;
 }
 
+/* "1.2 MB of 2.0 GB, 3.4 MB/s, about 9 min left": how far a download is, and its speed
+ * once it is known. */
+std::string progress_line(const Download &download)
+{
+    std::string line = size_text(download.done) + " of " + size_text(download.total);
+    if (download.rate == 0)
+        return line;
+    char speed[32];
+    std::snprintf(speed, sizeof speed, "%.1f MB/s", double(download.rate) / 1048576.0);
+    line += ", " + std::string(speed);
+    if (download.total > download.done)
+    {
+        const uint64_t whole =
+            (download.total - download.done + download.rate - 1) / download.rate; /* rounded up */
+        line += whole < 90 ? ", about " + std::to_string(whole) + " s left"
+                           : ", about " + std::to_string((whole + 59) / 60) + " min left";
+    }
+    return line;
+}
+
 std::string source_name(Services &services, const std::string &key)
 {
     for (const auto &source : services.status().sources)
@@ -236,7 +256,7 @@ class DownloadScreen final : public Screen
             {
                 share = at->total ? double(at->done) / double(at->total) : 0;
                 state = "Downloading " + percent(at->done, at->total);
-                detail_ = size_text(at->done) + " of " + size_text(at->total);
+                detail_ = progress_line(*at);
             }
             else if (at->state == State::verifying)
             {
@@ -372,7 +392,7 @@ class DownloadsScreen final : public Screen
     void draw(Canvas &c) override
     {
         const Status status = services_.status();
-        panel(c, "Downloads", "Games on your network, downloaded when you play them.");
+        panel(c, "Downloads", "Games on your network, written by the console's FTP server.");
         if (!status.configured)
         {
             int y =
@@ -528,8 +548,7 @@ class DownloadsScreen final : public Screen
                 break;
             case State::downloading:
                 row.state = percent(download.done, download.total);
-                row.line = size_text(download.done) + " of " + size_text(download.total) +
-                           ", from " + from;
+                row.line = progress_line(download) + ", from " + from;
                 break;
             case State::verifying:
                 row.state = "Checking " + percent(download.done, download.total);

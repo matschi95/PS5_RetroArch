@@ -98,6 +98,7 @@ struct Shared
     std::atomic<uint64_t> cancel{0};
     std::atomic<uint64_t> current{0};
     std::atomic<uint64_t> current_done{0};
+    std::atomic<uint64_t> current_rate{0}; /* bytes a second, smoothed; 0 until a second went by */
 };
 
 Shared &state()
@@ -499,12 +500,54 @@ std::string staged_path(const Paths &paths, const Game &game, const Part &part)
     return staged_folder(paths, game.source, game.id) + "/" + part.name;
 }
 
-/* The bytes of a download, to its file in .remote-downloads/. */
+/* A download's file written here (without a writer of the title's: the host's tests). */
+class FileWriter final : public Writer
+{
+  public:
+    ~FileWriter() override
+    {
+        if (file_)
+            std::fclose(file_);
+    }
+    bool open(const std::string &path, uint64_t offset, std::string *error) override
+    {
+        if (file_)
+            std::fclose(file_);
+        file_ = std::fopen(path.c_str(), files::size(path) >= 0 ? "r+b" : "wb");
+        if (!file_ || ftruncate(fileno(file_), static_cast<off_t>(offset)) != 0 ||
+            std::fseek(file_, static_cast<long>(offset), SEEK_SET) != 0)
+        {
+            *error = "Cannot write " + path;
+            return false;
+        }
+        return true;
+    }
+    bool write(const void *data, size_t size, std::string *error) override
+    {
+        if (std::fwrite(data, 1, size, file_) == size)
+            return true;
+        *error = "Cannot write the file (is the drive full?)";
+        return false;
+    }
+    bool finish(std::string *error) override
+    {
+        const bool closed = std::fclose(file_) == 0;
+        file_ = nullptr;
+        if (!closed)
+            *error = "Cannot write the file (is the drive full?)";
+        return closed;
+    }
+
+  private:
+    std::FILE *file_ = nullptr;
+};
+
+/* The bytes of a download, to its file in .remote-downloads/ through the writer. */
 class FileReceiver final : public Receiver
 {
   public:
-    FileReceiver(std::FILE *file, uint64_t base, uint64_t start)
-        : file_(file), base_(base), start_(start)
+    FileReceiver(Writer &writer, std::string path, uint64_t base, uint64_t start)
+        : writer_(writer), path_(std::move(path)), base_(base), start_(start)
     {
     }
 
@@ -514,23 +557,28 @@ class FileReceiver final : public Receiver
         if (from_start && start_ > 0)
         {
             start_ = 0;
-            if (ftruncate(fileno(file_), 0) != 0 || std::fseek(file_, 0, SEEK_SET) != 0)
-            {
-                error_ = "Cannot write the file";
-                return false;
-            }
+            return writer_.open(path_, 0, &error_);
         }
         return true;
     }
     bool take(const void *data, size_t size) override
     {
-        if (std::fwrite(data, 1, size, file_) != size)
-        {
-            error_ = "Cannot write the file (is the drive full?)";
+        if (!writer_.write(data, size, &error_))
             return false;
-        }
         written_ += size;
-        state().current_done.store(base_ + start_ + written_);
+        Shared &s = state();
+        s.current_done.store(base_ + start_ + written_);
+        /* The speed: measured each second, smoothed so that it does not jump. */
+        const Clock::time_point now = Clock::now();
+        const double seconds = std::chrono::duration<double>(now - sampled_).count();
+        if (seconds >= 1.0)
+        {
+            const double measured = double(written_ - sampled_bytes_) / seconds;
+            const double before = double(s.current_rate.load());
+            s.current_rate.store(uint64_t(before > 0.0 ? before * 0.7 + measured * 0.3 : measured));
+            sampled_ = now;
+            sampled_bytes_ = written_;
+        }
         return true;
     }
     bool stopped() override
@@ -545,11 +593,14 @@ class FileReceiver final : public Receiver
     }
 
   private:
-    std::FILE *file_;
+    Writer &writer_;
+    std::string path_;
     uint64_t base_;  /* the game's bytes before this file */
     uint64_t start_; /* where in the file the transfer began */
     uint64_t written_ = 0;
     std::string error_;
+    Clock::time_point sampled_ = Clock::now(); /* when the speed was last measured */
+    uint64_t sampled_bytes_ = 0;               /* written_ then */
 };
 
 enum class Outcome
@@ -597,28 +648,24 @@ Outcome download_part(Source &source, const Paths &paths, const Game &game, cons
         return Outcome::failed;
     }
     /* Going on: written over from `start` (the rewound bytes come again), else a new file. */
-    std::FILE *file = std::fopen(staged.c_str(), existing >= 0 ? "r+b" : "wb");
-    if (!file || ftruncate(fileno(file), static_cast<off_t>(start)) != 0 ||
-        std::fseek(file, static_cast<long>(start), SEEK_SET) != 0)
-    {
-        if (file)
-            std::fclose(file);
-        *error = "Cannot write " + staged;
+    const std::unique_ptr<Writer> writer =
+        paths.writer ? paths.writer() : std::unique_ptr<Writer>(new FileWriter);
+    if (!writer->open(staged, start, error))
         return Outcome::failed;
-    }
     state().current_done.store(base + start);
-    FileReceiver receiver(file, base, start);
+    FileReceiver receiver(*writer, staged, base, start);
     const bool fetched = source.fetch(
         as_source_game(game),
         {part.id, part.name, part.size, FileKind::game, part.crc32, part.md5, part.sha1}, start,
         receiver, error);
-    const bool closed = std::fclose(file) == 0;
+    std::string written;
+    const bool finished = writer->finish(&written);
     /* Stopped or failed: what the file has stays, to go on from. */
     if (receiver.stopped())
         return Outcome::stopped;
-    if (!receiver.error().empty() || !closed)
+    if (!receiver.error().empty() || !finished)
     {
-        *error = !receiver.error().empty() ? receiver.error() : "Cannot write " + staged;
+        *error = !receiver.error().empty() ? receiver.error() : written;
         return Outcome::failed;
     }
     if (!fetched)
@@ -860,6 +907,7 @@ void *download_thread(void *)
         entry.total = game.size;
         s.current.store(serial);
         s.current_done.store(present(paths, game));
+        s.current_rate.store(0);
         s.transferring = true;
         lock.unlock();
 
@@ -1328,6 +1376,7 @@ std::vector<Download> downloads()
         download.state = entry.state;
         const bool running = entry.state == State::downloading || entry.state == State::verifying;
         download.done = running ? s.current_done.load() : entry.done;
+        download.rate = entry.state == State::downloading ? s.current_rate.load() : 0;
         download.total = entry.total;
         if (download.total == 0)
             if (const Game *game = find_game(s, entry.source, entry.id))

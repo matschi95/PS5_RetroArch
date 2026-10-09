@@ -17,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <thread>
 #include <vector>
 
@@ -199,6 +200,52 @@ bool listed(size_t sources)
 
 std::vector<remote::Placed> placed;
 std::mutex placed_lock;
+
+/* A writer as the console's FTP server is one: none answering, or one whose drive is full. */
+class TestWriter final : public remote::Writer
+{
+  public:
+    explicit TestWriter(bool answers) : answers_(answers)
+    {
+    }
+    bool open(const std::string &path, uint64_t offset, std::string *error) override
+    {
+        if (!answers_)
+        {
+            *error = "Downloads need an FTP server running on the console; none answers";
+            return false;
+        }
+        file_ = std::fopen(path.c_str(), files::size(path) >= 0 ? "r+b" : "wb");
+        return file_ && ftruncate(fileno(file_), off_t(offset)) == 0 &&
+               std::fseek(file_, long(offset), SEEK_SET) == 0;
+    }
+    bool write(const void *data, size_t size, std::string *error) override
+    {
+        if (written_ + size > (2u << 20))
+        {
+            *error = "The console's FTP server could not write the file: No space left on device";
+            return false;
+        }
+        written_ += size;
+        return std::fwrite(data, 1, size, file_) == size;
+    }
+    bool finish(std::string *) override
+    {
+        const bool closed = std::fclose(file_) == 0;
+        file_ = nullptr;
+        return closed;
+    }
+    ~TestWriter() override
+    {
+        if (file_)
+            std::fclose(file_);
+    }
+
+  private:
+    bool answers_;
+    std::FILE *file_ = nullptr;
+    uint64_t written_ = 0;
+};
 } // namespace
 
 static void identity()
@@ -496,6 +543,38 @@ int main(int argc, char **argv)
     office.hold = false;
     until([] { return remote::downloads().empty() && !files::is_folder(paths.downloads); });
     assert(remote::placed_folder("office", "71").empty());
+
+    /* Written by the console's FTP server: none answering fails it, saying so; a full drive
+     * fails it with what the server said, what was written kept to go on from. */
+    {
+        remote::Paths ftp = paths;
+        ftp.writer = [] { return std::unique_ptr<remote::Writer>(new TestWriter(false)); };
+        remote::start(ftp, {});
+        assert(remote::enqueue("office", "71", false));
+        until(
+            []
+            {
+                const auto list = remote::downloads();
+                return !list.empty() && list[0].state == remote::State::failed;
+            });
+        assert(remote::downloads()[0].error ==
+               "Downloads need an FTP server running on the console; none answers");
+        ftp.writer = [] { return std::unique_ptr<remote::Writer>(new TestWriter(true)); };
+        remote::start(ftp, {});
+        assert(remote::enqueue("office", "71", false));
+        until(
+            []
+            {
+                const auto list = remote::downloads();
+                return !list.empty() && list[0].state == remote::State::failed;
+            });
+        assert(remote::downloads()[0].error ==
+               "The console's FTP server could not write the file: No space left on device");
+        assert(files::size(staged) == (2u << 20));
+        assert(remote::cancel("office", "71"));
+        until([] { return !files::is_folder(paths.downloads); });
+        remote::start(paths, {});
+    }
 
     /* Stopped while a game runs: what it has stays, and it goes on afterwards. */
     office.hold = true;
