@@ -116,11 +116,12 @@
       "name": "PS5 RetroArch (this port: title code, platform integration, build scripts and patches)",
       "kind": "code",
       "always": true,
-      "artifacts": ["eboot.bin", "retroarch.cfg", "LEGAL.txt", "sce_sys/param.json", "es-de/es-de.bin", "picker/picker.bin"],
+      "artifacts": ["eboot.bin", "retroarch.cfg", "LEGAL.txt", "sce_sys/param.json", "es-de/es-de.bin", "picker/picker.bin", "cores/remote_libretro.so", "info/remote_libretro.info", "cores/remote_libretro.info"],
       "licence": "GPL-3.0-or-later",
       "copyright": [
         "Copyright (C) 2026 Mihawk",
-        "Copyright (C) 2026 BlackBearReloaded (the native title pipeline from ps5-native-app-boilerplate and ProsperoLight)"
+        "Copyright (C) 2026 BlackBearReloaded (the native title pipeline from ps5-native-app-boilerplate and ProsperoLight)",
+        "Copyright (C) 2026 Mario Reisinger (the download sources and their remote core)"
       ],
       "texts": [{"from": "LICENSE", "to": "GPL-3.0.txt"}],
       "source": {"kind": "git", "path": ".", "remote": "https://github.com/mihawk-99/PS5_RetroArch"},

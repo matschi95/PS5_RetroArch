@@ -810,17 +810,57 @@ static int compare_games(const void *a, const void *b)
     return label ? label : strcmp(x->path, y->path);
 }
 
+int ps5_library_is_fetch_core(const char *core)
+{
+    const char *slash = core ? strrchr(core, '/') : NULL;
+    return core && strcmp(slash ? slash + 1 : core, PS5_LIBRARY_FETCH_CORE) == 0;
+}
+
+/* The first core, in path order, whose info names the platform's database (or one of
+ * the databases that run it). */
+int ps5_library_platform_core(const struct ps5_library *library, const char *id, char *out,
+                              size_t size)
+{
+    const struct platform *platform = platform_by_id(id);
+    if (size)
+        out[0] = '\0';
+    if (!platform)
+        return 0;
+    char databases[512];
+    snprintf(databases, sizeof(databases), "%s",
+             platform->core_databases ? platform->core_databases
+             : platform->database     ? platform->database
+                                      : "");
+    for (const char *at = databases; at && *at;)
+    {
+        const char *bar = strchr(at, '|');
+        char database[256];
+        snprintf(database, sizeof(database), "%.*s", (int)(bar ? (size_t)(bar - at) : strlen(at)),
+                 at);
+        for (size_t c = 0; c < library->core_count; c++)
+            if (list_has(library->cores[c].databases, database) &&
+                !ps5_library_is_fetch_core(library->cores[c].path))
+            {
+                snprintf(out, size, "%s", library->cores[c].path);
+                return 1;
+            }
+        at = bar ? bar + 1 : NULL;
+    }
+    return 0;
+}
+
 static void finish_systems(struct ps5_library *library)
 {
     for (size_t s = 0; s < library->system_count; s++)
     {
         struct ps5_library_system *system = &library->systems[s];
-        /* Its core: the one its entries name most. */
+        /* Its core: the one its entries name most, the fetch core aside (it runs no
+         * game itself). */
         size_t best = 0;
         for (size_t i = 0; i < library->game_count; i++)
         {
             const struct ps5_library_game *game = &library->games[i];
-            if (game->system != s || !game->core[0])
+            if (game->system != s || !game->core[0] || ps5_library_is_fetch_core(game->core))
                 continue;
             size_t votes = 0;
             for (size_t j = 0; j < library->game_count; j++)
@@ -832,28 +872,9 @@ static void finish_systems(struct ps5_library *library)
                 snprintf(system->core, sizeof(system->core), "%s", game->core);
             }
         }
-        /* Else the first core, in path order, whose info names the platform's database
-         * (or one of the databases that run it). */
-        const struct platform *platform = platform_by_id(system->id);
-        if (!system->core[0] && platform)
-        {
-            char databases[512];
-            snprintf(databases, sizeof(databases), "%s",
-                     platform->core_databases ? platform->core_databases
-                     : platform->database     ? platform->database
-                                              : "");
-            for (const char *at = databases; at && *at && !system->core[0];)
-            {
-                const char *bar = strchr(at, '|');
-                char database[256];
-                snprintf(database, sizeof(database), "%.*s",
-                         (int)(bar ? (size_t)(bar - at) : strlen(at)), at);
-                for (size_t c = 0; c < library->core_count && !system->core[0]; c++)
-                    if (list_has(library->cores[c].databases, database))
-                        snprintf(system->core, sizeof(system->core), "%s", library->cores[c].path);
-                at = bar ? bar + 1 : NULL;
-            }
-        }
+        /* Else the platform's. */
+        if (!system->core[0])
+            ps5_library_platform_core(library, system->id, system->core, sizeof(system->core));
         /* Its folder and extensions. */
         int first = 1;
         for (size_t i = 0; i < library->game_count; i++)

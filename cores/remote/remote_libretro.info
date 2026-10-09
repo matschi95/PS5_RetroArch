@@ -1,0 +1,18 @@
+# The remote core of the download sources (src/remote/remote.h): a game on a server in
+# the network, downloaded and then run by game mode with its system's core; and the
+# download sources' own screens.
+display_name = "Remote"
+authors = "Mario Reisinger"
+supported_extensions = "remote"
+corename = "Remote"
+license = "GPLv3"
+permissions = ""
+display_version = "1"
+categories = "Game"
+manufacturer = ""
+systemname = "Download sources"
+systemid = "remote"
+database = ""
+supports_no_game = "false"
+needs_fullpath = "true"
+description = "The core of a game on a download source that is not yet on the console. It downloads the game, then starts it with its system's core. It also shows the downloads and the sources."

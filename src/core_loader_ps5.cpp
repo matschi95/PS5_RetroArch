@@ -577,8 +577,15 @@ bool load(Module *m)
 }
 } // namespace
 
+/* src/remote/remote_ps5.cpp: the download sources pause while a game's core runs (weak, so the
+ * loader's host test links without them). */
+extern "C" void ps5_remote_core_opening(const char *path) __attribute__((weak));
+extern "C" void ps5_remote_core_closed(const char *path) __attribute__((weak));
+
 extern "C" void *ps5_core_dlopen(const char *path, int)
 {
+    if (ps5_remote_core_opening && path)
+        ps5_remote_core_opening(path);
     pthread_mutex_lock(&mutex);
     error_text[0] = 0;
     if (!path || !*path || std::strlen(path) >= sizeof(Module::path))
@@ -656,8 +663,10 @@ extern "C" int ps5_core_dlclose(void *handle)
         if (*at == handle)
         {
             Module *m = *at;
+            char closed[sizeof(Module::path)] = "";
             if (--m->references == 0)
             {
+                std::strcpy(closed, m->path);
                 *at = m->next;
                 /* A core's threads must be gone before its code is: PPSSPP
                  * detaches the threads of its dedicated tasks, and one still
@@ -699,6 +708,8 @@ extern "C" int ps5_core_dlclose(void *handle)
                 }
             }
             pthread_mutex_unlock(&mutex);
+            if (ps5_remote_core_closed && closed[0])
+                ps5_remote_core_closed(closed);
             return 0;
         }
     fail("invalid core handle on close");

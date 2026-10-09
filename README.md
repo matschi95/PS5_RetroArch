@@ -202,6 +202,50 @@ hardware-rendered cores use GPU shaders.
 
 Presets and overlays are included for offline use. Compatibility varies by core and preset; original notices are retained.
 
+<a id="games-from-your-server"></a>
+
+## <img src="webui/assets/fluent/cloud.svg" width="26" height="26" alt=""> Games from your server
+
+Your collection can stay on a server in your network. Its games are listed in
+RetroArch and in EmulationStation beside the ones on the console, and a game is
+downloaded the first time you play it. Nothing is streamed: once downloaded, a game
+is on the console like any other. Each kind of server is a backend
+(`src/remote/source.h`); several servers can be set up at once.
+
+- **Set up:** save `config/remote/sources.json` over FTP:
+  ```json
+  { "sources": [
+      { "type": "<backend>", "name": "Home", ...what the backend needs... }
+  ] }
+  ```
+  A server added there is read as the title starts, so its games are there at once
+  (a server that does not answer delays that start by 5 seconds, once). While
+  RetroArch runs, the lists are read again in the background, at most every 15
+  minutes; what changed is listed at the next start.
+- **Listed:** RetroArch has a playlist per system, such as *Sony - PlayStation
+  (Remote)*; EmulationStation lists the games in the system itself. Their names end
+  in **[Remote]** (`"marker"` in `sources.json` changes it), and the server's cover
+  is their box art. A game on several servers is listed once, and one already on the
+  console (the same checksum, file name or name) is not offered.
+- **Play:** choosing a game downloads it, after asking which server when several
+  have it, and starts it with its system's core once it is all there; afterwards you
+  are back where you chose it. **Circle** keeps it downloading in the background,
+  **Square** cancels.
+- **Downloads:** the playlist *Remote* has **Downloads**: each server and whether it
+  answered, the download queue (try a failed download again, cancel), and the games
+  downloaded, which **Square** twice deletes from the console (their saves stay). The
+  queue downloads one game at a time while RetroArch's menu is up, and goes on after
+  the title was closed.
+- **Where games go:** the folder in `content/` named after the system (`SNES`, `PS1`,
+  `Saturn`...), else `content/<system>/`, a folder per game with the server's files,
+  so a disc game keeps its `.cue`, `.bin` and `.m3u` together. A downloaded game moves
+  into the system's own playlist at the next start.
+- **Interrupted downloads:** files are downloaded to `content/.remote-downloads/` and
+  moved into place once all of the game is there, so a game's folder only ever holds a
+  whole game. A download stops while a game runs and when the title closes, and goes on
+  where it was (the last 4 MB fetched again in case of a power cut). A cancelled one
+  is removed.
+
 <a id="your-files"></a>
 
 ## <img src="assets/readme/starfield-section.svg" width="960" alt=""><br><img src="webui/assets/fluent/document-folder.svg" width="26" height="26" alt=""> Your files
@@ -220,6 +264,8 @@ usually `/data/homebrew/PPSA99169/`.
 | `cores/` and `info/` | Native cores and their metadata |
 | `config/retroarch.cfg` | Live RetroArch configuration |
 | `config/webui.cfg` | Saved global WebUI preferences |
+| `config/remote/` | Your game servers (`sources.json`), their game lists and the download queue |
+| `content/<system>/.remote/` | Entries of server games not yet downloaded |
 | `config/<core>/` | Core options and RetroArch overrides, per core and per game |
 | `config/remaps/<core>/` | Controller remaps, per core and per game |
 | `library/<system>/` | Scraped box art, screenshots and details, shared by every frontend |

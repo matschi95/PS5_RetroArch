@@ -349,7 +349,10 @@ void after_retroarch(const Paths &paths, const std::string &mode, int status,
         ps5::debug::mark(line);
         if (ps5_game_write(paths.result.c_str(), &game, 1) != 0)
             ps5::debug::mark("game mode: the result could not be written");
-        restart_as(game.frontend, replaced_wait_seconds,
+        /* A game RetroArch's menu asked for (a download source's, downloaded first:
+         * src/remote/remote.h) goes back to the menu. */
+        restart_as(game.frontend, paths.eboot == game.frontend ? "--ps5-mode=retroarch" : "",
+                   replaced_wait_seconds,
                    "game mode: LoadExec of the frontend did not replace the process; the title "
                    "closes; result");
         return;

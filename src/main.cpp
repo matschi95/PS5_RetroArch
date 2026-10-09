@@ -59,6 +59,10 @@
 #include "webui_update.h"
 #include "webui_link.h"
 
+extern "C" void ps5_remote_list_new(void); /* src/remote/remote_ps5.cpp */
+extern "C" void ps5_remote_sync(void);
+extern "C" void ps5_remote_start(void);
+
 /* RetroArch's entry, in C. */
 extern "C" int rarch_main(int argc, char *argv[], void *data);
 extern "C" int sceSystemServiceHideSplashScreen();
@@ -383,6 +387,12 @@ int main(int process_argc, char **process_argv)
     ps5::memory::init("/app0/memory-diagnostics.log", PS5_RETROARCH_BUILD_ID);
     ps5_vulkan_profile_init();
 
+    /* A download source set up since the last start is listed now, while the shell's
+     * splash still covers the title, so its games are in the playlists the frontend
+     * reads (src/remote/remote_ps5.cpp); a server that does not answer costs 5 seconds
+     * once. */
+    ps5_remote_list_new();
+
     /* The shell's splash covers the title until it explicitly dismisses it.
      * video_ps5 does this while opening its display, but video_vulkan never
      * enters that code. This is title startup work for either video driver. */
@@ -399,6 +409,9 @@ int main(int process_argc, char **process_argv)
     /* Which frontend this launch is for (src/frontend_mode_ps5.cpp): from the home
      * screen the picker, which restarts the title as RetroArch or EmulationStation;
      * those two are their own executables, started through LoadExec. */
+    /* The download sources' games (src/remote/library.h): written into the playlists
+     * here, before a frontend reads them and before RetroArch could write them. */
+    ps5_remote_sync();
     ps5_frontend_dispatch(process_argc, process_argv);
     ps5_webui_link_frontend("retroarch");
 
@@ -619,6 +632,9 @@ int main(int process_argc, char **process_argv)
     ps5_webui_prepare("/app0");
     if (!ps5_webui_link_wait(8000))
         ps5_webui_start("/app0");
+    /* The download sources' lists are read and their queue downloads while RetroArch's
+     * menu is up (src/remote/remote_ps5.cpp). */
+    ps5_remote_start();
     const int status =
         rarch_main(static_cast<int>(base_count + extra_count), argv_with_extras, nullptr);
 

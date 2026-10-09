@@ -22,7 +22,8 @@
  *   - a system's core is the one its entries name most, else the core RetroArch's
  *     core info (/app0/info) associates with the platform's database, among the
  *     cores the title carries; a game's own playlist core still wins when it is
- *     launched (game mode);
+ *     launched (game mode). The fetch core of a game on a download source
+ *     (PS5_LIBRARY_FETCH_CORE) is never a system's core;
  *   - a system's folder is the deepest folder all its games are in, and its
  *     extensions those of its games and of its core;
  *   - what RetroArch remembers of play goes with each game: whether it is in the
@@ -51,6 +52,10 @@ extern "C"
 #define PS5_LIBRARY_INFO "/app0/info"
 #define PS5_LIBRARY_CORES "/app0/cores"
 #define PS5_LIBRARY_PATH_MAX 1024
+/* The core of a game that is on a download source and not yet here (src/remote/): it
+ * fetches the game and has game mode run it. It runs no game itself, so it is never a
+ * system's core. */
+#define PS5_LIBRARY_FETCH_CORE "remote_libretro.so"
 
     /* A core the title carries, from its core info file. */
     struct ps5_library_core
@@ -124,6 +129,14 @@ extern "C"
     const char *ps5_library_platform(const char *name);
     /* A platform's RetroArch database name ("Sony - PlayStation"), or NULL. */
     const char *ps5_library_platform_database(const char *id);
+
+    /* 1 when a core's path is the fetch core's (PS5_LIBRARY_FETCH_CORE). */
+    int ps5_library_is_fetch_core(const char *core);
+    /* The core the title runs a platform's games with when no playlist says: the first,
+     * in path order, whose core info names the platform's database. 1 and its path, or 0
+     * and "" when the title has none for it. */
+    int ps5_library_platform_core(const struct ps5_library *library, const char *id, char *out,
+                                  size_t size);
 
     /* Game mode's launch command for a game (src/ps5_game.h): RetroArch's command line
      * with its system's core, shell-quoted. 0, or -1 when it does not fit. */
