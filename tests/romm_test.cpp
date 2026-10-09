@@ -9,6 +9,8 @@
 #include "../src/remote/backends.h"
 #include "../src/remote/romm/romm_client.h"
 #include "../src/remote/romm/romm_source.h"
+#include "../src/remote/save_config.h"
+#include "../src/remote/servers.h"
 
 #include <cassert>
 #include <chrono>
@@ -127,6 +129,79 @@ int main(int argc, char **argv)
         assert(romm::new_enough("5.3.0") && !romm::new_enough("5.2.9"));
     }
 
+    /* The WebUI's setup: the address asked, the account signed in once (the console's own
+     * token made, an earlier one of it replaced), what the server is for written to both
+     * files, changed without the password, taken out. No token goes to the page. */
+    {
+        const std::string config = root + "/setup";
+        remote::ServerProbe probe;
+        std::string why;
+        assert(remote::probe_server("romm", url + "/", &probe, &why) && probe.url == url &&
+               probe.version == "5.3.1");
+        assert(!remote::probe_server("romm", url + "/old", &probe, &why) && probe.too_old &&
+               probe.version == "5.2.0" && why.find("too old") != std::string::npos);
+        assert(!remote::probe_server("romm", "http://127.0.0.1:1", &probe, &why) &&
+               why.rfind("No RomM answers at http://127.0.0.1:1", 0) == 0);
+        assert(!remote::probe_server("ftp", url, &probe, &why));
+
+        remote::ServerSetup setup;
+        setup.name = "Home";
+        setup.url = url;
+        setup.user = "player";
+        setup.password = "wrong";
+        setup.saves = true;
+        setup.states = false;
+        assert(!remote::save_server(config, setup, "", &why) &&
+               why == "RomM did not accept the name or password");
+        setup.password = "secret";
+        assert(remote::save_server(config, setup, "", &why));
+        std::string text_;
+        Json sources, saves;
+        assert(files::read(config + "/sources.json", &text_) && Json::parse(text_, &sources));
+        const Json &home = sources["sources"].items.at(0);
+        const std::string token = home["token"].str();
+        assert(token.rfind("rmm_made_", 0) == 0 && home["__server_user"].str() == "player" &&
+               home["games"].yes() && home["firmware"].yes() && !home.has("password"));
+        const remote::SaveConfig sync = remote::read_save_config(config + "/save-sync.json");
+        assert(sync.type == "romm" && sync.settings["url"].str() == url &&
+               sync.settings["token"].str() == token && sync.automatic && !sync.states);
+        /* The token can do what the server is for. */
+        auto made = source("{\"url\":\"" + url + "\",\"token\":\"" + token + "\"}");
+        std::vector<remote::SourceGame> some;
+        assert(made->list(&some, &why, never) && !some.empty());
+        assert(!remote::save_server(config, setup, "", &why) &&
+               why == "A server named Home is set up already");
+        /* Signed in again: a new token, the old one gone from the server. */
+        assert(remote::save_server(config, setup, "Home", &why));
+        assert(files::read(config + "/sources.json", &text_) && Json::parse(text_, &sources));
+        const std::string again = sources["sources"].items.at(0)["token"].str();
+        assert(again != token);
+        assert(!made->list(&some, &why, never));
+        /* Changed without the password: the sign-in stays, the save sync goes. */
+        setup.password.clear();
+        setup.saves = false;
+        setup.firmware = false;
+        assert(remote::save_server(config, setup, "Home", &why));
+        assert(files::read(config + "/sources.json", &text_) && Json::parse(text_, &sources));
+        assert(sources["sources"].items.at(0)["token"].str() == again &&
+               !sources["sources"].items.at(0)["firmware"].yes());
+        assert(remote::read_save_config(config + "/save-sync.json").type.empty());
+        setup.url = url + "/old";
+        assert(!remote::save_server(config, setup, "Home", &why) &&
+               why.find("too old") != std::string::npos);
+        setup.url = url;
+        setup.games = false;
+        assert(!remote::save_server(config, setup, "Home", &why) &&
+               why == "Choose at least one thing the server is for");
+        const Json listed = remote::servers_json(config);
+        assert(listed.items.size() == 1 && listed.items[0]["name"].str() == "Home" &&
+               listed.items[0]["user"].str() == "player" && listed.items[0]["games"].yes() &&
+               listed.write().find("rmm_") == std::string::npos);
+        assert(remote::remove_server(config, "Home", &why));
+        assert(remote::servers_json(config).items.empty());
+        assert(!remote::remove_server(config, "Home", &why));
+    }
+
     /* The list: in pages, signed in by token or password, what is the game kept. */
     std::vector<remote::SourceGame> games;
     std::string error;
@@ -210,6 +285,6 @@ int main(int argc, char **argv)
 
     std::puts("romm: addresses, pages and categories, sign-ins, platforms, a cover, files from "
               "their start, a byte on, a server that cannot go on, past their end; a game "
-              "downloaded through the download sources, firmware PASS");
+              "downloaded through the download sources, firmware, the WebUI's setup PASS");
     return 0;
 }

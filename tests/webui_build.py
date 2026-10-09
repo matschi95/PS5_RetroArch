@@ -5,7 +5,12 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ['src/webui_ps5.cpp', 'src/webui_transfer.cpp', 'src/webui_update.cpp', 'src/scraper.cpp',
-           'src/scraper_http.cpp']
+           'src/scraper_http.cpp',
+           # The game servers' setup (src/remote/servers.h) and the backends it signs in with.
+           'src/remote/servers.cpp', 'src/remote/backends.cpp', 'src/remote/files.cpp',
+           'src/remote/save_config.cpp', 'src/remote/romm/romm_client.cpp',
+           'src/remote/romm/romm_source.cpp', 'src/remote/romm/romm_firmware.cpp',
+           'src/remote/romm/romm_saves.cpp', 'src/remote/romm/romm_setup.cpp']
 C_SOURCES = ['src/ps5_library.c']
 
 

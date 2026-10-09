@@ -33,6 +33,14 @@ namespace ps5::remote::romm
 /* The oldest RomM the backends take. */
 inline constexpr char minimum_version[] = "5.3.0";
 
+/* What a sign-in of this console asks RomM for, whatever it is used for (pairing, the
+ * WebUI's): the games and their firmware, their save data, this console as a device, and the
+ * user's name. */
+const std::vector<std::string> &console_scopes();
+/* What tells this console apart from others of the user: made once, kept beside `folder` (the
+ * save store's, config/remote/save-sync). */
+std::string console_id(const std::string &folder);
+
 class Client
 {
   public:
@@ -91,6 +99,8 @@ class Client
     bool check_version(const Stopped &stopped, std::string *error, unsigned timeout = 0) const;
     /* The server's version when the last check found it older than minimum_version; "" else. */
     std::string too_old() const;
+    /* The version the last check found; "" before one. */
+    std::string version() const;
 
     /* What an answer's status means, for the screen. path: what was asked for ("/api/..."), so
      * a refusal (403) can name the token's scope that is missing. */
@@ -116,7 +126,7 @@ class Client
     const std::string file_;
     mutable std::mutex version_lock_;
     mutable bool version_ok_ = false;
-    mutable std::string too_old_;
+    mutable std::string version_, too_old_;
 };
 
 /* ---- the parts, for tests ---- */

@@ -8,7 +8,9 @@
 #include "../files.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <random>
 #include <utility>
 
 namespace ps5::remote::romm
@@ -263,11 +265,18 @@ bool Client::check_version(const Stopped &stopped, std::string *error, unsigned 
     Json::parse(body, &heartbeat);
     const std::string version = text(heartbeat["SYSTEM"], "VERSION");
     std::lock_guard<std::mutex> guard(version_lock_);
+    version_ = version;
     version_ok_ = new_enough(version);
     too_old_ = version_ok_ ? "" : version;
     if (!version_ok_)
         *error = "RomM " + version + " is too old: it needs RomM " + minimum_version + " or newer";
     return version_ok_;
+}
+
+std::string Client::version() const
+{
+    std::lock_guard<std::mutex> guard(version_lock_);
+    return version_;
 }
 
 std::string Client::too_old() const
@@ -393,6 +402,35 @@ std::string normal_url(std::string url)
     if (scheme != "http" && scheme != "https")
         return "";
     return scheme + url.substr(url.find("://"));
+}
+
+const std::vector<std::string> &console_scopes()
+{
+    static const std::vector<std::string> scopes = {
+        "platforms.read", "roms.read",    "firmware.read", "assets.read",
+        "assets.write",   "devices.read", "devices.write", "me.read"};
+    return scopes;
+}
+
+std::string console_id(const std::string &folder)
+{
+    const std::string file = files::parent(folder) + "/console-id";
+    std::string id;
+    files::read(file, &id);
+    while (!id.empty() && (id.back() == '\n' || id.back() == '\r' || id.back() == ' '))
+        id.pop_back();
+    if (id.size() == 16)
+        return id;
+    /* Unlike any other console's is all it needs to be: the time, to the nanosecond, mixed. */
+    uint64_t mixed = uint64_t(std::chrono::system_clock::now().time_since_epoch().count()) ^
+                     (uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()) << 17);
+    mixed = std::mt19937_64(mixed)();
+    char out[17];
+    std::snprintf(out, sizeof out, "%016llx", (unsigned long long)mixed);
+    id = out;
+    files::make_folders(files::parent(file));
+    (void)files::write(file, id + "\n");
+    return id;
 }
 
 bool new_enough(const std::string &version)

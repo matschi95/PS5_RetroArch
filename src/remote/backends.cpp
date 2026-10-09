@@ -7,6 +7,7 @@
 
 #include "romm/romm_firmware.h"
 #include "romm/romm_saves.h"
+#include "romm/romm_setup.h"
 #include "romm/romm_source.h"
 
 namespace ps5::remote
@@ -14,7 +15,8 @@ namespace ps5::remote
 const std::vector<Backend> &backends()
 {
     static const std::vector<Backend> all = {
-        {"romm", romm::make_source, romm::make_firmware, romm::make_saves, &romm::pairing},
+        {"romm", romm::make_source, romm::make_firmware, romm::make_saves, &romm::pairing,
+         &romm::sign_in},
     };
     return all;
 }

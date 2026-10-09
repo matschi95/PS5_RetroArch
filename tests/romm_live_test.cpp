@@ -10,7 +10,8 @@
  * and the save states of a game synced between two consoles (each a device of its own): up,
  * unchanged, down, a conflict and the player's choices, a state the server keeps no hash of; a
  * token without the scopes the save sync needs refused, naming them; the firmware in the
- * library's bios/snes listed and fetched for a core that names it.
+ * library's bios/snes listed and fetched for a core that names it; the WebUI's setup signed in
+ * with the player's password, its token able to list the games, made again in its place.
  */
 #include "../src/remote/backends.h"
 #include "../src/remote/files.h"
@@ -22,6 +23,7 @@
 #include "../src/remote/romm/romm_saves.h"
 #include "../src/remote/save_config.h"
 #include "../src/remote/save_sync.h"
+#include "../src/remote/servers.h"
 
 #include <algorithm>
 #include <cassert>
@@ -191,6 +193,47 @@ int main(int argc, char **argv)
             hashed = hashed || (file.name == "Alpha Quest (USA).sfc" &&
                                 remote::normal_crc(file.crc32) == crc_of(alpha));
     check(hashed, "a file's CRC32 as RomM hashed it");
+
+    /* The WebUI's setup: the player's name and password, once; the console's own token. */
+    if (const char *pair = std::getenv("ROMM_LIVE_USER"))
+    {
+        const std::string user = pair;
+        remote::ServerSetup setup;
+        setup.name = "Live";
+        setup.url = url;
+        setup.user = user.substr(0, user.find(':'));
+        setup.password = user.substr(user.find(':') + 1);
+        setup.saves = true;
+        const std::string config = folder + "/setup";
+        std::string why;
+        const bool saved = remote::save_server(config, setup, "", &why) &&
+                           remote::save_server(config, setup, "Live", &why);
+        std::string text_;
+        Json sources;
+        files::read(config + "/sources.json", &text_);
+        Json::parse(text_, &sources);
+        const Json made = sources["sources"].items.empty() ? Json() : sources["sources"].items[0];
+        auto by_token = remote::make_source("romm", entry(url, made["token"].str()), &why);
+        std::vector<remote::SourceGame> listed_games;
+        const bool lists = by_token && by_token->list(&listed_games, &why, {});
+        /* Made again: the console has one token, not two. */
+        Json basic = Json::record();
+        basic.set("url", Json::of(url));
+        basic.set("username", Json::of(setup.user));
+        basic.set("password", Json::of(setup.password));
+        auto client = remote::romm::Client::make(basic, "the check", &why);
+        remote::romm::Client::Answer answer;
+        Json tokens;
+        int ours = 0;
+        if (client && client->send(nullptr, "/api/client-tokens", {}, &answer, &why) &&
+            Json::parse(answer.body, &tokens))
+            for (const Json &token : tokens.items)
+                ours += token["name"].str().rfind("PS5 RetroArch ", 0) == 0;
+        check(saved && made["__server_user"].str() == setup.user && lists &&
+                  listed_games.size() == 3 && ours == 1,
+              "the WebUI's setup signed in, its token lists the games, one token (" +
+                  std::to_string(ours) + ") " + why);
+    }
 
     /* Firmware: the BIOS in the library's bios/snes, for a core that names it (and one it
      * does not have); a token without the scope told so. */

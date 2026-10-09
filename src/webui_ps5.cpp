@@ -6,6 +6,7 @@
 #include "webui_update.h"
 #include "webui_transfer.h"
 #include "scraper.h"
+#include "remote/servers.h"
 #include "ps5_frontend_choice.h"
 #include "../vendor/retroarch/libretro-common/include/libretro.h"
 #include <microhttpd.h>
@@ -252,7 +253,9 @@ bool content_path(const std::string &relative, std::string &absolute, bool new_l
     if (!valid_path(relative))
         return false;
     absolute = root_path + "/content";
-    struct stat st{};
+    struct stat st
+    {
+    };
     if (content_stat(absolute.c_str(), &st) || !S_ISDIR(st.st_mode))
         return false;
     size_t start = 0;
@@ -279,7 +282,9 @@ bool content_parents(const std::string &relative, std::string &absolute)
     if (relative.empty() || !valid_path(relative))
         return false;
     absolute = root_path + "/content";
-    struct stat st{};
+    struct stat st
+    {
+    };
     if (content_stat(absolute.c_str(), &st) || !S_ISDIR(st.st_mode))
         return false;
     size_t start = 0;
@@ -302,7 +307,9 @@ bool content_parents(const std::string &relative, std::string &absolute)
 }
 bool exists(const std::string &absolute)
 {
-    struct stat st{};
+    struct stat st
+    {
+    };
     return content_stat(absolute.c_str(), &st) == 0 || errno != ENOENT;
 }
 std::string trim(std::string s)
@@ -384,7 +391,9 @@ std::vector<std::string> installed_cores()
     std::vector<std::string> cores;
     for (const auto &entry : read_config(root_path + "/webui/core-metadata/index.cfg"))
     {
-        struct stat st{};
+        struct stat st
+        {
+        };
         if (!valid_path(entry.first) || entry.first.find('/') != std::string::npos ||
             !valid_path(entry.second) || entry.second.find('/') != std::string::npos)
             continue;
@@ -405,7 +414,9 @@ std::vector<std::string> core_profiles()
         std::string name = entry->d_name;
         if (!valid_path(name) || name.find('/') != std::string::npos || name == "webui-cores")
             continue;
-        struct stat st{};
+        struct stat st
+        {
+        };
         std::string folder = root_path + "/config/" + name;
         if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
             continue;
@@ -511,7 +522,9 @@ const std::vector<BiosNeed> &bios_needs()
 }
 bool system_file(const std::string &path)
 {
-    struct stat st{};
+    struct stat st
+    {
+    };
     return !content_stat(path.c_str(), &st) && S_ISREG(st.st_mode) && st.st_size > 0;
 }
 std::string bios_alerts()
@@ -549,7 +562,9 @@ std::string bios_alerts()
     std::sort(files.begin(), files.end());
     for (const auto &file : files)
     {
-        struct stat st{};
+        struct stat st
+        {
+        };
         const auto info =
             read_config(root_path + "/info/" + file.substr(0, file.size() - 3) + ".info");
         // Its settings live under its library name; it is shown by its display name.
@@ -663,7 +678,9 @@ std::string catalog_revision(const std::string &core)
 std::string runtime_metadata(const std::string &core, const char *extension)
 {
     const std::string folder = root_path + "/config/webui-metadata";
-    struct stat st{};
+    struct stat st
+    {
+    };
     if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
         return {};
     auto text = read_file(folder + '/' + core + extension, 2 * 1024 * 1024);
@@ -783,7 +800,9 @@ MHD_Result config_editor(MHD_Connection *c, const std::string &method, const std
     {
         std::string folder = root_path + "/config/webui-cores";
         mkdir(folder.c_str(), 0755);
-        struct stat st{};
+        struct stat st
+        {
+        };
         if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
             return error(c, 500, "The settings folder is not available.");
     }
@@ -801,7 +820,9 @@ void apply_core_settings()
                 continue;
             const std::string folder = root_path + "/config/" + core;
             mkdir(folder.c_str(), 0755);
-            struct stat st{};
+            struct stat st
+            {
+            };
             if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
                 continue;
             std::string destination = folder + '/' + core + ext;
@@ -942,7 +963,9 @@ MHD_Result list_content(MHD_Connection *c)
         std::string name = item->d_name;
         if (!valid_path(name) || name.find('/') != std::string::npos)
             continue;
-        struct stat st{};
+        struct stat st
+        {
+        };
         if (content_stat((path + '/' + name).c_str(), &st) ||
             (!S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode)))
             continue;
@@ -1003,7 +1026,9 @@ MHD_Result download(MHD_Connection *c)
 MHD_Result serve_file(MHD_Connection *c, const std::string &path, const char *type, bool attachment)
 {
     int fd = open(path.c_str(), O_RDONLY | O_NOFOLLOW);
-    struct stat st{};
+    struct stat st
+    {
+    };
     if (fd < 0)
         return error(c, 404, "This file is not available.");
     if (fstat(fd, &st) || !S_ISREG(st.st_mode))
@@ -1202,7 +1227,9 @@ bool game_safe_path(const std::string &path, bool create_parents = false, bool n
             base = mount;
     if (base.empty() || !valid_path(path.substr(base.size() + 1)))
         return false;
-    struct stat st{};
+    struct stat st
+    {
+    };
     if (content_stat(base.c_str(), &st) || !S_ISDIR(st.st_mode))
         return false;
     for (size_t at = base.size() + 1; at < path.size();)
@@ -1267,7 +1294,9 @@ void scan_game_saves(const std::string &folder, const std::string &stem, bool st
         const std::string name = entry->d_name, path = folder + '/' + name;
         if (name.empty() || name.front() == '.')
             continue;
-        struct stat st{};
+        struct stat st
+        {
+        };
         if (content_stat(path.c_str(), &st))
             continue;
         if (S_ISDIR(st.st_mode))
@@ -1353,7 +1382,9 @@ std::string game_files_json(const GameFiles &g)
 {
     auto entry = [&](const std::string &path)
     {
-        struct stat st{};
+        struct stat st
+        {
+        };
         content_stat(path.c_str(), &st);
         const std::string shown =
             path.rfind(root_path + '/', 0) == 0 ? "/app0" + path.substr(root_path.size()) : path;
@@ -1503,7 +1534,9 @@ void prepare_upload(MHD_Connection *c, Request &r)
         fail(413, "Files must be 64 GiB or smaller.");
         return;
     }
-    struct statvfs storage{};
+    struct statvfs storage
+    {
+    };
     if (storage_space(storage) && r.expected > uint64_t(storage.f_bavail) * storage.f_frsize)
     {
         fail(507, "There is not enough free space on the console.");
@@ -1965,7 +1998,9 @@ MHD_Result transfer_route(MHD_Connection *c, const std::string &url, const std::
             return error(c, 400, "Choose a valid content folder and filename.");
         if (!replace && exists(destination))
             return error(c, 409, "A file with this name already exists. Rename your file first.");
-        struct statvfs storage{};
+        struct statvfs storage
+        {
+        };
         if (storage_space(storage) && size > uint64_t(storage.f_bavail) * storage.f_frsize)
             return error(c, 507, "There is not enough free space on the console.");
         const std::string id = nonce();
@@ -2021,6 +2056,69 @@ bool is_transfer_route(const std::string &url)
 {
     return url.rfind("/api/upload", 0) == 0;
 }
+// The game servers (src/remote/servers.h): what sources.json and save-sync.json say, set up by
+// the wizard. A sign-in waits for the server, so they keep a lock of their own.
+std::mutex servers_lock;
+bool is_servers_route(const std::string &url)
+{
+    return url == "/api/servers" || url.rfind("/api/servers/", 0) == 0;
+}
+MHD_Result servers_route(MHD_Connection *c, const std::string &url, const std::string &method,
+                         Request &r)
+{
+    namespace remote = ps5::remote;
+    std::lock_guard<std::mutex> guard(servers_lock);
+    const std::string config = root_path + "/config/remote";
+    const auto listing = [&config]
+    {
+        remote::Json out = remote::Json::record();
+        out.set("servers", remote::servers_json(config));
+        return out.write();
+    };
+    remote::Json body;
+    if (method != "GET" && method != "DELETE" &&
+        (!remote::Json::parse(r.body, &body) || body.kind != remote::Json::object))
+        return error(c, 400, "The request is not valid JSON.");
+    std::string why;
+    if (method == "GET" && url == "/api/servers")
+        return respond(c, 200, listing());
+    if (method == "POST" && url == "/api/servers/probe")
+    {
+        remote::ServerProbe probe;
+        const bool ok = remote::probe_server(body["type"].str(), body["url"].str(), &probe, &why);
+        remote::Json out = remote::Json::record();
+        out.set("ok", remote::Json::of(ok));
+        out.set("url", remote::Json::of(probe.url));
+        out.set("version", remote::Json::of(probe.version));
+        out.set("too_old", remote::Json::of(probe.too_old));
+        out.set("needed", remote::Json::of(probe.needed));
+        out.set("error", remote::Json::of(why));
+        return respond(c, 200, out.write());
+    }
+    if (method == "POST" && url == "/api/servers")
+    {
+        remote::ServerSetup setup;
+        setup.type = body["type"].str().empty() ? "romm" : body["type"].str();
+        setup.name = body["name"].str();
+        setup.url = body["url"].str();
+        setup.user = body["user"].str();
+        setup.password = body["password"].str();
+        setup.games = body["games"].yes();
+        setup.firmware = body["firmware"].yes();
+        setup.saves = body["saves"].yes();
+        setup.states = body["states"].yes();
+        if (!remote::save_server(config, setup, body["previous"].str(), &why))
+            return error(c, 400, why.c_str());
+        return respond(c, 200, listing());
+    }
+    if (method == "DELETE" && url == "/api/servers")
+    {
+        if (!remote::remove_server(config, query(c, "name", ""), &why))
+            return error(c, 400, why.c_str());
+        return respond(c, 200, listing());
+    }
+    return error(c, 404, "Not found.");
+}
 bool is_scraper_route(const std::string &url)
 {
     return url.rfind("/api/scraper", 0) == 0 || url.rfind("/api/library", 0) == 0;
@@ -2034,7 +2132,9 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
 {
     if (method == "GET" && url == "/api/status")
     {
-        struct statvfs fs{};
+        struct statvfs fs
+        {
+        };
         bool space_known = storage_space(fs);
         return respond(
             c, 200,
@@ -2114,6 +2214,7 @@ MHD_Result route(MHD_Connection *c, const std::string &url, const std::string &m
         {"/app.js", "text/javascript; charset=utf-8"},
         {"/icons.js", "text/javascript; charset=utf-8"},
         {"/add-game.js", "text/javascript; charset=utf-8"},
+        {"/servers.js", "text/javascript; charset=utf-8"},
         {"/assets/fluent/LICENSE", "text/plain; charset=utf-8"},
         {"/assets/fluent/arrow-square-down.svg", "image/svg+xml"},
         {"/assets/fluent/arrow-sync.svg", "image/svg+xml"},
@@ -2324,6 +2425,8 @@ MHD_Result handle(void *, MHD_Connection *c, const char *url, const char *method
         return scraper_route(c, url, method, r);
     if (r.transfer != Transfer::none || is_transfer_route(url))
         return transfer_route(c, url, method, r);
+    if (is_servers_route(url))
+        return servers_route(c, url, method, r);
     std::lock_guard<std::mutex> guard(state_lock);
     return route(c, url, method, r);
 }
@@ -2353,7 +2456,9 @@ void save_metadata(const char *name, std::string json, const Config &defaults)
         return;
     const std::string folder = root_path + "/config/webui-metadata";
     mkdir(folder.c_str(), 0755);
-    struct stat st{};
+    struct stat st
+    {
+    };
     if (content_stat(folder.c_str(), &st) || !S_ISDIR(st.st_mode))
         return;
     const auto tag = catalog_revision(name);

@@ -8,7 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 RETROARCH = ROOT / 'vendor/retroarch'
 SOURCES = ['src/remote/ui/remote_ui.cpp', 'src/remote/ui/canvas.cpp', 'src/remote/remote.cpp', 'src/remote/firmware.cpp',
-           'src/remote/files.cpp', 'src/remote/stream_check.cpp', 'src/remote/backends.cpp', 'src/remote/romm/romm_source.cpp', 'src/remote/romm/romm_firmware.cpp', 'src/remote/romm/romm_client.cpp', 'src/remote/romm/romm_saves.cpp',
+           'src/remote/files.cpp', 'src/remote/stream_check.cpp', 'src/remote/backends.cpp', 'src/remote/romm/romm_source.cpp', 'src/remote/romm/romm_firmware.cpp', 'src/remote/romm/romm_setup.cpp', 'src/remote/servers.cpp', 'src/remote/romm/romm_client.cpp', 'src/remote/romm/romm_saves.cpp',
            'src/remote/pairing.cpp', 'src/remote/save_config.cpp', 'src/scraper_http.cpp']
 INCLUDES = ['-Isrc', '-Ithird_party', '-I' + str(RETROARCH)]
 

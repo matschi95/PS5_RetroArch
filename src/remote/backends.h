@@ -18,6 +18,7 @@
 #include "firmware.h"
 #include "pairing.h"
 #include "save_store.h"
+#include "servers.h"
 #include "source.h"
 
 #include <memory>
@@ -40,6 +41,8 @@ struct Backend
     /* Its save store's entry signed in by pairing (pairing.h); nullptr: only by what is typed
      * into save-sync.json. */
     const Pairing *pairing;
+    /* Its setup from the WebUI (servers.h); nullptr: only by what is typed into the files. */
+    const ServerSignIn *sign_in;
 };
 
 /* All of them, in the order the menu offers them. */

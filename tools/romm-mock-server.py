@@ -5,8 +5,9 @@
 """romm-mock-server.py <port file>
 
 For tests/test_romm.py: what tests/romm_test.cpp checks of the RomM backend. Serves
-/api/heartbeat (RomM 5.3.1; under /old, 5.2.0), /api/platforms, /api/roms (a page), a cover and
-/api/roms/<file id>/files/content/<name> (with Range) on 127.0.0.1 and a free port it writes to <port file>, signed in as "Bearer rmm_test" or
+/api/heartbeat (RomM 5.3.1; under /old, 5.2.0), /api/platforms, /api/roms (a page), a cover,
+/api/roms/<file id>/files/content/<name> (with Range), and the client tokens the WebUI's setup
+makes (/api/client-tokens: list, make, delete; /api/users/me) on 127.0.0.1 and a free port it writes to <port file>, signed in as "Bearer rmm_test" or
 "Basic" for player:secret. Files are made of a pattern of their id, so the check can tell every
 byte.
 
@@ -24,7 +25,10 @@ import re
 import sys
 import urllib.parse
 
-TOKENS = ("Bearer rmm_test", "Basic cGxheWVyOnNlY3JldA==")  # player:secret
+PASSWORD = "Basic cGxheWVyOnNlY3JldA=="  # player:secret
+TOKENS = {"Bearer rmm_test", PASSWORD}
+MADE = {}  # client tokens made: id -> {"id", "name", "scopes"}; each signs in as Bearer rmm_made_<id>
+SERIALS = iter(range(100, 1 << 30))
 
 
 def pattern(file_id, size):
@@ -82,6 +86,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, json.dumps({"SYSTEM": {"VERSION": version}}).encode())
         if self.headers.get("Authorization") not in TOKENS:
             return self.send(401, b'{"detail":"Unauthorized"}')
+        if url.path == "/api/users/me":
+            return self.send(200, json.dumps({"username": "player"}).encode())
+        if url.path == "/api/client-tokens":
+            if self.headers.get("Authorization") != PASSWORD:
+                return self.send(403, b'{"detail":"Forbidden"}')
+            return self.send(200, json.dumps(list(MADE.values())).encode())
         if url.path == "/api/platforms":
             return self.send(200, json.dumps([{"id": i, "slug": s, "fs_slug": s} for s, i in PLATFORMS.items()])
                              .encode())
@@ -128,6 +138,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 return None
         return self.send(404, b'{"detail":"Not Found"}')
+
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
+        if self.path != "/api/client-tokens" or self.headers.get("Authorization") != PASSWORD:
+            return self.send(401, b'{"detail":"Unauthorized"}')
+        made = next(SERIALS)
+        MADE[made] = {"id": made, "name": body["name"], "scopes": body["scopes"]}
+        TOKENS.add(f"Bearer rmm_made_{made}")
+        return self.send(201, json.dumps({**MADE[made], "raw_token": f"rmm_made_{made}"}).encode())
+
+    def do_DELETE(self):
+        match = re.fullmatch(r"/api/client-tokens/(\d+)", self.path)
+        if not match or self.headers.get("Authorization") != PASSWORD or int(match.group(1)) not in MADE:
+            return self.send(404, b'{"detail":"Not Found"}')
+        TOKENS.discard(f"Bearer rmm_made_{match.group(1)}")
+        del MADE[int(match.group(1))]
+        return self.send(200, b"{}")
 
 
 def main():

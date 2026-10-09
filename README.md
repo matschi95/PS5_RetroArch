@@ -96,6 +96,7 @@ Stay connected while switching between the picker, RetroArch, and EmulationStati
 | <img src="webui/assets/fluent/library.svg" width="24" height="24" alt=""> **Games** | Browse cover art, search, filter by system or letter, and sort your collection. |
 | <img src="webui/assets/fluent/arrow-square-down.svg" width="24" height="24" alt=""> **Download Media** | Download artwork and game details for a few games or your whole library. |
 | <img src="webui/assets/fluent/document-folder.svg" width="24" height="24" alt=""> **Content** | Browse folders, create subfolders, and upload or download files. |
+| <img src="webui/assets/fluent/database.svg" width="24" height="24" alt=""> **Game servers** | Set up your RomM step by step: game downloads, BIOS downloads and the save sync. |
 | <img src="webui/assets/fluent/arrow-sync.svg" width="24" height="24" alt=""> **Transfers** | Follow uploads and their results. Downloads appear in your browser’s download manager. |
 | <img src="webui/assets/fluent/settings.svg" width="24" height="24" alt=""> **Settings** | Adjust global preferences, core options, controller mappings, and the startup frontend. |
 
@@ -215,7 +216,16 @@ files and the save sync alike; an older one is refused, and **Downloads** shows 
 *Too old* with the version it needs. Each kind of server is a backend
 (`src/remote/source.h`), and several servers can be set up at once.
 
-- **Set up:** save `config/remote/sources.json` over FTP:
+- **Set up in the WebUI:** **Game servers › Add server** walks you through it: your
+  RomM's address (checked at once, with its version), what it is for (game downloads,
+  BIOS downloads, the save sync with or without save states) and your RomM name and
+  password. These are used once: the console makes a sign-in of its own with them (a
+  client API token named *PS5 RetroArch* in your RomM profile, which a later setup
+  replaces) and forgets the password; the account needs RomM's role *editor* or higher.
+  **Edit** changes what a server is for without signing in again; **Remove** takes it
+  out (downloaded games and your saves stay).
+- **Or by hand:** the wizard only writes these files; save `config/remote/sources.json`
+  over FTP:
   ```json
   { "sources": [
       { "type": "romm", "name": "Home", "url": "http://192.168.1.20:3000", "token": "rmm_..." }
@@ -223,6 +233,7 @@ files and the save sync alike; an older one is refused, and **Downloads** shows 
   ```
   `token` is a RomM client API token (**Profile › Client tokens**); `"username"` and
   `"password"` work instead, and `"platforms": ["snes", "psx"]` lists only those.
+  `"games": false` or `"firmware": false` turns off what a server is not for.
   A server added there is read as the title starts, so its games are there at once
   (a server that does not answer delays that start by 5 seconds, once). While
   RetroArch runs, the lists are read again in the background, at most every 15
@@ -278,7 +289,8 @@ server, or another user of the same one, works as well. RomM keeps them (5.3 or 
 as for the games; as RomM keeps RetroArch's: the save in the slot *autosave* of the core, the save states
 by their file names); each kind of server is a backend (`src/remote/save_store.h`).
 
-- **Pair:** the playlist *Remote* has **Save sync**: choose one of your download
+- **Set up:** in the WebUI's **Game servers** (above), tick **Save sync**.
+- **Or pair on the console:** the playlist *Remote* has **Save sync**: choose one of your download
   sources' RomM servers, scan the QR code with your phone (or open the address), sign
   in as yourself and approve the code. The console gets a sign-in of its own; nothing
   is typed. **Square** twice unlinks the server.

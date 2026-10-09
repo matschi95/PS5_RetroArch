@@ -52,29 +52,6 @@ std::string detail(const Client &client, const Client::Answer &answer, const std
     return client.status_error(answer.status);
 }
 
-/* What tells this console apart from others of the user: made once, kept beside the store's
- * folder. */
-std::string console_id(const std::string &folder)
-{
-    const std::string file = files::parent(folder) + "/console-id";
-    std::string id;
-    files::read(file, &id);
-    while (!id.empty() && (id.back() == '\n' || id.back() == '\r' || id.back() == ' '))
-        id.pop_back();
-    if (id.size() == 16)
-        return id;
-    /* Unlike any other console's is all it needs to be: the time, to the nanosecond, mixed. */
-    uint64_t mixed = uint64_t(std::chrono::system_clock::now().time_since_epoch().count()) ^
-                     (uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()) << 17);
-    mixed = std::mt19937_64(mixed)();
-    char out[17];
-    std::snprintf(out, sizeof out, "%016llx", (unsigned long long)mixed);
-    id = out;
-    files::make_folders(files::parent(file));
-    (void)files::write(file, id + "\n");
-    return id;
-}
-
 std::string id_of(const Json &asset)
 {
     const int64_t id = number(asset, "id");
@@ -93,11 +70,6 @@ std::string save_version(const Json &save)
     const std::string hash = text(save, "content_hash");
     return !hash.empty() ? hash : id_of(save) + "@" + text(save, "updated_at");
 }
-
-/* What the save sync asks for: the games, their save data, this console as a device, and the
- * user's name for the menu. */
-const char *const scopes[] = {"platforms.read", "roms.read",     "assets.read", "assets.write",
-                              "devices.read",   "devices.write", "me.read"};
 
 class RommSaves final : public SaveStore
 {
@@ -493,7 +465,7 @@ bool pair_start(const Json &settings, const std::string &folder, PairingStart *s
     payload.set("client", Json::of("PS5-RetroArch"));
     payload.set("platform", Json::of("ps5"));
     Json &wanted = payload.set("requested_scopes", Json::list());
-    for (const char *scope : scopes)
+    for (const std::string &scope : console_scopes())
         wanted.push(Json::of(scope));
     Client::Answer answer;
     if (!client->send("POST", "/api/auth/device/init", payload.write(), &answer, error, stopped))

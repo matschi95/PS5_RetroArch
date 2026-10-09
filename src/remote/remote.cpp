@@ -57,6 +57,7 @@ struct SourceState
     std::string name;
     std::string signature;          /* its entry in sources.json, to see a change */
     std::shared_ptr<Source> source; /* nullptr when the entry is not usable */
+    bool games_wanted = true;       /* its "games": false lists none (its firmware only) */
     /* Its firmware (firmware.h) and what its last list said; nullptr when it has none. */
     std::shared_ptr<FirmwareSource> firmware;
     std::vector<FirmwareFile> firmware_files;
@@ -458,6 +459,12 @@ void read_sources(Shared &s)
             {
                 if (entry.kind != Json::object)
                     continue;
+                /* What it is for (servers.h): neither games nor firmware is a server of the
+                 * save sync only, no download source. */
+                const auto wanted = [&entry](const char *key)
+                { return entry[key].kind != Json::boolean || entry[key].yes(); };
+                if (!wanted("games") && !wanted("firmware"))
+                    continue;
                 const std::string type = lower(text(entry, "type"));
                 std::string name = text(entry, "name");
                 if (name.empty())
@@ -487,8 +494,9 @@ void read_sources(Shared &s)
                 std::string error;
                 state->source = make_source(type, entry, &error);
                 state->error = error;
+                state->games_wanted = wanted("games");
                 std::string firmware_error;
-                if (state->source)
+                if (state->source && wanted("firmware"))
                     state->firmware = make_firmware_source(type, entry, &firmware_error);
                 load_catalog(s, *state);
                 if (!state->source)
@@ -858,10 +866,12 @@ void *list_thread(void *)
         const std::shared_ptr<Source> source = state->source;
         const std::shared_ptr<FirmwareSource> firmware = state->firmware;
         const std::string key = state->key, name = state->name;
+        const bool games_wanted = state->games_wanted;
         lock.unlock();
         std::vector<SourceGame> listed;
         std::string error;
-        const bool read = source->list(&listed, &error, [&s] { return s.halt.load(); });
+        const bool read =
+            !games_wanted || source->list(&listed, &error, [&s] { return s.halt.load(); });
         std::vector<FirmwareFile> firmware_listed;
         const bool firmware_read =
             read && firmware &&
@@ -1328,7 +1338,8 @@ void list_new(const Paths &paths, unsigned timeout)
     {
         std::vector<SourceGame> listed;
         std::string error;
-        const bool read_ = state->source->list(&listed, &error, [] { return false; }, timeout);
+        const bool read_ = !state->games_wanted ||
+                           state->source->list(&listed, &error, [] { return false; }, timeout);
         std::vector<FirmwareFile> firmware;
         const bool firmware_read =
             read_ && state->firmware &&

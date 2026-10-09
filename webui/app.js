@@ -81,16 +81,17 @@ async function reconnect() {
 }
 function pageFromHash() {
   const name = location.hash.slice(1).split('?')[0];
-  return ['content', 'games', 'media', 'transfers', 'settings'].includes(name) ? name : 'overview';
+  return ['content', 'games', 'media', 'servers', 'transfers', 'settings'].includes(name) ? name : 'overview';
 }
 function navigate() {
   const page = pageFromHash();
   $$('.page').forEach(node => { node.hidden = node.id !== page; });
   $$('[data-page]').forEach(node => { if (node.dataset.page === page) node.setAttribute('aria-current', 'page'); else node.removeAttribute('aria-current'); });
-  $('#page-title').textContent = page === 'media' ? 'Download Media' : page[0].toUpperCase() + page.slice(1);
+  $('#page-title').textContent = page === 'media' ? 'Download Media' : page === 'servers' ? 'Game servers' : page[0].toUpperCase() + page.slice(1);
   if (page === 'content') loadContent(currentPath);
   if (page === 'games') loadGames();
   if (page === 'media') openMedia();
+  if (page === 'servers' && typeof loadServers === 'function') loadServers();
   $('#main').focus({ preventScroll: true });
 }
 function openFolder(path) {

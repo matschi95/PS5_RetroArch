@@ -40,7 +40,7 @@ SCOPES = ["platforms.read", "roms.read", "assets.read", "assets.write", "devices
           "firmware.read"]
 SOURCES = ["tests/romm_live_test.cpp", "src/remote/remote.cpp", "src/remote/firmware.cpp", "src/remote/library.cpp", "src/remote/save_config.cpp", "src/remote/files.cpp",
            "src/remote/backends.cpp", "src/remote/pairing.cpp", "src/remote/stream_check.cpp", "src/remote/save_sync.cpp",
-           "src/remote/romm/romm_client.cpp", "src/remote/romm/romm_source.cpp", "src/remote/romm/romm_firmware.cpp", "src/remote/romm/romm_saves.cpp",
+           "src/remote/romm/romm_client.cpp", "src/remote/romm/romm_source.cpp", "src/remote/romm/romm_firmware.cpp", "src/remote/romm/romm_setup.cpp", "src/remote/servers.cpp", "src/remote/romm/romm_saves.cpp",
            "src/scraper_http.cpp"]
 
 # The fake games: two, and a large one (downloaded, stopped part way and gone on with).
