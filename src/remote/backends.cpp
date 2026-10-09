@@ -5,6 +5,7 @@
  */
 #include "backends.h"
 
+#include "romm/romm_saves.h"
 #include "romm/romm_source.h"
 
 namespace ps5::remote
@@ -12,7 +13,7 @@ namespace ps5::remote
 const std::vector<Backend> &backends()
 {
     static const std::vector<Backend> all = {
-        {"romm", romm::make_source},
+        {"romm", romm::make_source, romm::make_saves},
     };
     return all;
 }
@@ -41,5 +42,23 @@ std::unique_ptr<Source> make_source(const std::string &type, const Json &setting
         return nullptr;
     }
     return backend->source(settings, error);
+}
+
+std::unique_ptr<SaveStore> make_save_store(const std::string &type, const Json &settings,
+                                           const std::string &folder, std::string *error)
+{
+    const Backend *backend = find_backend(type);
+    if (backend == nullptr)
+    {
+        *error = type.empty() ? "save-sync.json names no server (\"type\")"
+                              : "Unknown server type \"" + type + "\" in save-sync.json";
+        return nullptr;
+    }
+    if (backend->saves == nullptr)
+    {
+        *error = "A \"" + type + "\" server cannot keep save data";
+        return nullptr;
+    }
+    return backend->saves(settings, folder, error);
 }
 } // namespace ps5::remote

@@ -5,6 +5,8 @@
  */
 #include "romm_client.h"
 
+#include "../files.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -93,7 +95,12 @@ std::string Client::status_error(int status, const std::string &path) const
         /* A refusal: RomM 4.9 answers a wrong token or password so as well, so both are
          * named, with the scope a client API token needs for what was asked. */
         static const std::pair<const char *, const char *> scopes[] = {
-            {"/api/platforms", "platforms.read"}, {"/api/roms", "roms.read"}};
+            {"/api/platforms", "platforms.read"},
+            {"/api/roms", "roms.read"},
+            {"/api/saves", "assets.read and assets.write"},
+            {"/api/states", "assets.read and assets.write"},
+            {"/api/sync", "assets.read and devices.read"},
+            {"/api/devices", "devices.write"}};
         for (const auto &scope : scopes)
             if (path.rfind(scope.first, 0) == 0)
                 return "RomM did not accept the token or password in " + file_ +
@@ -130,6 +137,94 @@ bool Client::get(const std::string &path, const Stopped &stopped, std::string *b
         *body = response.body;
         return true;
     }
+    return false;
+}
+
+bool Client::send(const char *method, const std::string &path, const std::string &json,
+                  Answer *answer, std::string *error, const Stopped &stopped) const
+{
+    ps5_scraper::Request request;
+    if (method != nullptr && *method != '\0')
+        request.method = method;
+    request.url = url_ + path;
+    if (!authorization_.empty())
+        request.headers.emplace_back("Authorization", authorization_);
+    if (!json.empty())
+    {
+        request.headers.emplace_back("Content-Type", "application/json");
+        request.body = json;
+    }
+    request.limit = most_json;
+    request.stopped = stopped;
+    const ps5_scraper::Response response = http().send(request);
+    answer->status = response.status;
+    answer->body = response.body;
+    if (response.cancelled)
+        *error = "Stopped";
+    else if (response.too_large)
+        *error = "The server's answer is too large";
+    else if (response.status == 0)
+        *error = response.error.empty() ? "The server did not answer" : response.error;
+    else
+        return true;
+    return false;
+}
+
+bool Client::upload(const char *method, const std::string &path, const std::string &field,
+                    const std::string &file, const std::string &name, Answer *answer,
+                    std::string *error, const Stopped &stopped) const
+{
+    std::string data;
+    if (!files::read(file, &data, most_json))
+    {
+        *error = "Cannot read " + file;
+        return false;
+    }
+    ps5_scraper::Request request;
+    request.method = method;
+    request.url = url_ + path;
+    if (!authorization_.empty())
+        request.headers.emplace_back("Authorization", authorization_);
+    std::string type;
+    request.body = ps5_scraper::form_file(field, name, data, &type);
+    request.headers.emplace_back("Content-Type", type);
+    request.limit = most_json;
+    request.stopped = stopped;
+    const ps5_scraper::Response response = http().send(request);
+    answer->status = response.status;
+    answer->body = response.body;
+    if (response.cancelled)
+        *error = "Stopped";
+    else if (response.status == 0)
+        *error = response.error.empty() ? "The server did not answer" : response.error;
+    else
+        return true;
+    return false;
+}
+
+bool Client::download(const std::string &path, const std::string &file, std::string *error,
+                      const Stopped &stopped) const
+{
+    std::string body;
+    ps5_scraper::Request request;
+    request.url = url_ + path;
+    if (!authorization_.empty())
+        request.headers.emplace_back("Authorization", authorization_);
+    request.limit = most_json;
+    request.stopped = stopped;
+    const ps5_scraper::Response response = http().send(request);
+    if (response.cancelled)
+        *error = "Stopped";
+    else if (response.too_large)
+        *error = "The server's file is too large";
+    else if (response.status == 0)
+        *error = response.error.empty() ? "The server did not answer" : response.error;
+    else if (response.status != 200)
+        *error = status_error(response.status, path);
+    else if (!files::make_folders(files::parent(file)) || !files::write(file, response.body))
+        *error = "Cannot write " + file;
+    else
+        return true;
     return false;
 }
 

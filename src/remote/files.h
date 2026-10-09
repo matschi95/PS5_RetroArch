@@ -25,6 +25,8 @@ void remove_tree(const std::string &path);
 std::vector<std::string> names(const std::string &folder);
 /* A file's size, or -1 when it is not a file. */
 int64_t size(const std::string &path);
+/* When a file was last changed, seconds since 1970; 0 when it is not there. */
+int64_t modified(const std::string &path);
 bool is_folder(const std::string &path);
 /* "/a/b/c.txt" -> "/a/b" */
 std::string parent(const std::string &path);

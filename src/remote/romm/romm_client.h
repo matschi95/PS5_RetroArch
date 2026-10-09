@@ -52,6 +52,23 @@ class Client
      * (a whole address, not signed in). False when it did not come whole with status 200. */
     bool fetch(const std::string &path_or_url, uint64_t limit, const Stopped &stopped,
                std::string *body) const;
+    /* An answer of the server, whatever its status. */
+    struct Answer
+    {
+        int status = 0;
+        std::string body;
+    };
+    /* A request of `method` ("POST", "PUT"; GET with "" or nullptr) to `path`, signed in,
+     * with a JSON body (none when empty). False with *error when no answer came. */
+    bool send(const char *method, const std::string &path, const std::string &json, Answer *answer,
+              std::string *error, const Stopped &stopped = {}) const;
+    /* The file `file` sent as the form field `field` (named `name`), signed in. */
+    bool upload(const char *method, const std::string &path, const std::string &field,
+                const std::string &file, const std::string &name, Answer *answer,
+                std::string *error, const Stopped &stopped = {}) const;
+    /* What `path` has, into the file `file` (written whole or not at all). */
+    bool download(const std::string &path, const std::string &file, std::string *error,
+                  const Stopped &stopped = {}) const;
     /* All the games of the platforms asked for (all of them without), with their files. */
     bool games(std::vector<SourceGame> *games, const Stopped &stopped, std::string *error,
                unsigned timeout = 0) const;

@@ -4,7 +4,8 @@
  * Copyright (C) 2026 Mario Reisinger
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Each use has an interface of its own (a download source: src/remote/source.h), and a
+ * Each use has an interface of its own (a download source: src/remote/source.h, the console's
+ * save data: src/remote/save_store.h), and a
  * backend makes an object of it for an entry of its config file, or has none (nullptr) when
  * its server cannot be used that way. A server's own folder (src/remote/<type>/) has what its
  * uses share (src/remote/romm/romm_client.h).
@@ -14,6 +15,7 @@
  */
 #pragma once
 
+#include "save_store.h"
 #include "source.h"
 
 #include <memory>
@@ -27,6 +29,10 @@ struct Backend
     const char *type; /* "romm" */
     /* A download source from its entry in sources.json; nullptr: it has no games to download. */
     std::unique_ptr<Source> (*source)(const Json &settings, std::string *error);
+    /* The save store from its entry in save-sync.json, keeping what it needs between starts in
+     * `folder`; nullptr: it cannot keep save data. */
+    std::unique_ptr<SaveStore> (*saves)(const Json &settings, const std::string &folder,
+                                        std::string *error);
 };
 
 /* All of them, in the order the menu offers them. */
@@ -38,4 +44,7 @@ const Backend *find_backend(const std::string &type);
  * type is unknown, cannot be a download source or the entry is not usable. */
 std::unique_ptr<Source> make_source(const std::string &type, const Json &settings,
                                     std::string *error);
+/* The same for the save store, from the entry in save-sync.json. */
+std::unique_ptr<SaveStore> make_save_store(const std::string &type, const Json &settings,
+                                           const std::string &folder, std::string *error);
 } // namespace ps5::remote

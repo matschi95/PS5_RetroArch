@@ -91,6 +91,12 @@ std::vector<std::string> names(const std::string &folder)
     return found;
 }
 
+int64_t modified(const std::string &path)
+{
+    struct stat info;
+    return stat(path.c_str(), &info) == 0 ? int64_t(info.st_mtime) : 0;
+}
+
 int64_t size(const std::string &path)
 {
     struct stat status;
