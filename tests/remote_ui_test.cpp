@@ -185,6 +185,19 @@ int main(int argc, char **argv)
         screen->input(ui::circle);
         assert(screen->finished() && services.cancelled.empty());
     }
+    /* Failed from one of two sources: opened again, the source is chosen anew; the other
+     * one's download takes its place. */
+    {
+        SampleServices services;
+        services.enqueue("office", "70", false);
+        services.downloads_[0].state = remote::State::failed;
+        services.enqueued.clear();
+        auto screen = ui::open(stub_of({{"home", "1"}, {"office", "70"}}), services);
+        assert(services.enqueued.empty()); /* asks first */
+        screen->input(ui::cross);
+        assert(services.enqueued.size() == 1 && services.enqueued[0] == "home/1 first");
+        assert(services.cancelled.size() == 1 && services.cancelled[0] == "office/70");
+    }
     /* Square cancels. */
     {
         SampleServices services;
@@ -204,15 +217,21 @@ int main(int argc, char **argv)
         screen->input(ui::cross);
         assert(services.enqueued.size() == 2 && !screen->finished());
     }
-    /* Downloaded already: it starts at once; a start that fails says so. */
+    /* Downloaded already: it starts once "Starting the game..." is up (not while it is
+     * drawn); a start that fails says so. */
     {
         SampleServices services;
         auto screen = ui::open(stub_of({{"home", "71"}}), services);
+        screen->input(0);
+        assert(services.played.empty());
         shot(*screen, "14-starting");
+        assert(services.played.empty());
+        screen->input(0);
         assert(services.played.size() == 1 &&
                services.played[0] == "/app0/content/SNES/Chrono Trigger/Chrono Trigger.sfc with "
                                      "/app0/cores/snes9x_libretro.so");
         shot(*screen, "15-not-started");
+        screen->input(0);
         assert(services.played.size() == 1); /* once */
     }
     /* A stub of a game the sources no longer have. */
@@ -255,6 +274,7 @@ int main(int argc, char **argv)
         screen->input(ui::square);
         assert(services.removed.empty());
         shot(*screen, "23-delete");
+        screen->input(0); /* frames without a press keep it asked */
         screen->input(ui::square);
         assert(services.removed.size() == 1 && services.removed[0] == "71");
         screen->input(ui::circle);

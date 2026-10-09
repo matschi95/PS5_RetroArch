@@ -150,6 +150,17 @@ std::string media_cover(const Paths &paths, const std::string &platform, const s
     return paths.media + "/" + platform + "/covers/" + key + cover.substr(dot);
 }
 
+/* A cover the media library has for that game (any picture type), or "". */
+std::string media_cover_there(const Paths &paths, const std::string &platform,
+                              const std::string &game)
+{
+    for (const char *type : {".png", ".jpg"})
+        if (const std::string path = media_cover(paths, platform, game, type);
+            !path.empty() && files::size(path) > 0)
+            return path;
+    return "";
+}
+
 /* Copies a file unless the copy is there with its size. */
 bool copy_file(const std::string &from, const std::string &to)
 {
@@ -329,7 +340,7 @@ void sync(const Paths &paths)
                         items.push(entry);
                         return true;
                     });
-                if (added)
+                if (added && media_cover_there(paths, platform, path).empty())
                     copy_file(text(note, "cover"),
                               media_cover(paths, platform, path, text(note, "cover")));
                 return added;
@@ -396,6 +407,7 @@ void sync(const Paths &paths)
 
     /* Each platform's stubs, covers and playlist. */
     std::set<std::string> written;
+    const std::set<std::string> ours(written_before.begin(), written_before.end());
     const std::string fetch_core = paths.cores + "/" PS5_LIBRARY_FETCH_CORE;
     for (auto &platform : listed)
     {
@@ -431,8 +443,12 @@ void sync(const Paths &paths)
             const std::string path = stubs + "/" + name + ".remote";
             write_changed(path, stub.write(true));
             written.insert(path);
+            /* Into the media library only where no cover of the player's is: one of the same
+             * name stays, and is neither written over nor deleted later. */
+            const std::string there = media_cover_there(paths, platform.first, path);
             if (const std::string media = media_cover(paths, platform.first, path, cover);
-                !media.empty() && copy_file(cover, media))
+                !media.empty() && (there.empty() || (there == media && ours.count(media))) &&
+                copy_file(cover, media))
                 written.insert(media);
             entries.push_back(playlist_entry(path, game.name + marker, fetch_core, "Remote",
                                              game.crc32, platform.first));
@@ -463,9 +479,16 @@ void sync(const Paths &paths)
         written.insert(playlist);
     }
 
-    /* What was written before and is not now. */
+    /* What was written before and is not now; a cover that is now a game's on the console (a
+     * downloaded one under the same name) stays. */
+    std::set<std::string> kept_covers;
+    for (const auto &platform : here)
+        for (const Local &local : platform.second)
+            if (const std::string cover = media_cover_there(paths, platform.first, local.file);
+                !cover.empty())
+                kept_covers.insert(cover);
     for (const auto &path : written_before)
-        if (!written.count(path))
+        if (!written.count(path) && !kept_covers.count(path))
         {
             files::remove_tree(path);
             if (files::base_name(files::parent(path)) == ".remote")

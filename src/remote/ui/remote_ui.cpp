@@ -165,10 +165,12 @@ class DownloadScreen final : public Screen
                 folder_ = folder;
                 return;
             }
-        /* Already coming: from the source it comes from, now first. */
+        /* Already coming: from the source it comes from, now first; one whose download failed
+         * may come from another source this time. */
         for (const Download &download : services.downloads())
             for (const Game &game : title_.games)
-                if (download.source == game.source && download.id == game.id)
+                if (download.source == game.source && download.id == game.id &&
+                    (download.state != State::failed || title_.games.size() == 1))
                 {
                     choose(game);
                     return;
@@ -206,6 +208,15 @@ class DownloadScreen final : public Screen
         }
         if (!chosen_.id.empty() && (pressed & cross) && failed_)
             choose(chosen_); /* tried again */
+        /* Once "Starting the game..." was drawn: game mode runs it (this returns only when that
+         * did not happen). */
+        if (ready_ && !played_)
+        {
+            played_ = true;
+            play_error_ = services_.play(chosen_, folder_ + "/" + chosen_.file, stub_.core);
+            if (play_error_.empty())
+                play_error_ = "game mode did not start";
+        }
     }
 
     void draw(Canvas &c) override
@@ -228,14 +239,7 @@ class DownloadScreen final : public Screen
         {
             share = 1;
             state = play_error_.empty() ? "Starting the game..." : "The game could not be started";
-            if (!played_)
-            {
-                played_ = true;
-                draw_progress(c, state, share, "");
-                play_error_ = services_.play(chosen_, folder_ + "/" + chosen_.file, stub_.core);
-                if (play_error_.empty())
-                    play_error_ = "game mode did not start";
-            }
+            ready_ = true;
         }
         else if (!chosen_.id.empty())
         {
@@ -295,11 +299,20 @@ class DownloadScreen final : public Screen
   private:
     void choose(const Game &game)
     {
+        /* Another source's failed download of it goes: this one comes instead. */
+        for (const Download &download : services_.downloads())
+            for (const Game &other : title_.games)
+                if (download.source == other.source && download.id == other.id &&
+                    other.source != game.source && download.state == State::failed)
+                    services_.cancel(other.source, other.id);
         chosen_ = game;
         failed_ = false;
         detail_.clear();
         if (!services_.enqueue(game.source, game.id, true))
-            message_.say(services_, "The source no longer has this game.", true);
+            message_.say(services_,
+                         "The source no longer has this game, or it comes from another one "
+                         "already.",
+                         true);
     }
 
     void draw_progress(Canvas &c, const std::string &state, double share, const std::string &detail)
@@ -320,7 +333,7 @@ class DownloadScreen final : public Screen
     std::unique_ptr<SourceDialog> sources_;
     Game chosen_;
     std::string folder_, detail_, play_error_;
-    bool played_ = false, failed_ = false, finished_ = false;
+    bool ready_ = false, played_ = false, failed_ = false, finished_ = false;
     Message message_;
 };
 
@@ -339,13 +352,15 @@ class DownloadsScreen final : public Screen
             finished_ = true;
         if (rows.empty())
             return;
+        const size_t before = focus_;
         if (pressed & up)
             focus_ = (focus_ + rows.size() - 1) % rows.size();
         if (pressed & down)
             focus_ = (focus_ + 1) % rows.size();
         focus_ = std::min(focus_, rows.size() - 1);
         const Row &row = rows[focus_];
-        if (!(pressed & square) || row.kind != Row::placed_row)
+        /* A first Square asks; it stands until another button or another row. */
+        if ((pressed & ~uint32_t(square)) || focus_ != before || row.kind != Row::placed_row)
             armed_.clear();
         if (pressed & cross)
         {
@@ -520,7 +535,20 @@ class DownloadsScreen final : public Screen
             }
             list.push_back(row);
         }
-        const std::vector<Title> titles = services_.titles();
+        /* The titles and what of them is on the console: read again only when a list, a
+         * cover or a game on the console changed (the screen asks every frame). */
+        if (status.generation != generation_)
+        {
+            generation_ = status.generation;
+            titles_ = services_.titles();
+            placed_.clear();
+            for (const Title &title : titles_)
+                for (const Game &game : title.games)
+                    if (const std::string folder = services_.placed(game.source, game.id);
+                        !folder.empty())
+                        placed_.emplace_back(game, folder);
+        }
+        const std::vector<Title> &titles = titles_;
         const auto name_of = [&](const std::string &source, const std::string &id)
         {
             for (const Title &title : titles)
@@ -562,18 +590,15 @@ class DownloadsScreen final : public Screen
             }
             list.push_back(row);
         }
-        for (const Title &title : titles)
-            for (const Game &game : title.games)
-                if (const std::string folder = services_.placed(game.source, game.id);
-                    !folder.empty())
-                    list.push_back({Row::placed_row,
-                                    game.name,
-                                    folder,
-                                    "From " + source_name(services_, game.source),
-                                    false,
-                                    {},
-                                    game,
-                                    folder});
+        for (const auto &placed : placed_)
+            list.push_back({Row::placed_row,
+                            placed.first.name,
+                            placed.second,
+                            "From " + source_name(services_, placed.first.source),
+                            false,
+                            {},
+                            placed.first,
+                            placed.second});
         return list;
     }
 
@@ -581,6 +606,9 @@ class DownloadsScreen final : public Screen
     size_t focus_ = 0;
     bool reading_ = false, finished_ = false;
     std::string armed_; /* the game a first Square asked to delete */
+    uint64_t generation_ = ~uint64_t(0);
+    std::vector<Title> titles_;
+    std::vector<std::pair<Game, std::string>> placed_; /* the games on the console, their folders */
     Message message_;
 };
 

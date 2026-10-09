@@ -601,10 +601,22 @@ int main(int argc, char **argv)
     assert(read_json(snes_playlist)["items"].items.size() == 3);
     const std::string deleted = remote::placed_folder("office", "71");
     files::remove_tree(deleted);
+    remote::forget("office", "71");
+    assert(remote::placed_folder("office", "71").empty());
     remote::note_removed(paths, "snes", deleted + "/Chrono Trigger (USA).sfc");
     remote::sync(paths);
     assert(read_json(snes_playlist)["items"].items.size() == 2);
     assert(read_json(snes_remote)["items"].items.size() == 1);
+
+    /* A cover of the player's under a title's name: neither written over nor taken back. */
+    const std::string chrono_cover = paths.media + "/snes/covers/Chrono Trigger.jpg";
+    assert(read(chrono_cover) == "\xff\xd8 chrono");
+    std::remove(chrono_cover.c_str());
+    const std::string mine_cover = paths.media + "/snes/covers/Chrono Trigger.png";
+    write(mine_cover, "mine");
+    remote::sync(paths);
+    assert(read(mine_cover) == "mine" && files::size(chrono_cover) < 0);
+    assert(read(paths.config + "/written.json").find("covers") == std::string::npos);
 
     /* A source taken out: its games go, and what was written for it. */
     write(paths.config + "/sources.json",
@@ -612,6 +624,7 @@ int main(int argc, char **argv)
           "\"http://home\"}]}");
     remote::sync(paths);
     assert(files::size(snes_remote) < 0);
+    assert(read(mine_cover) == "mine");
     /* None set up: everything written is taken back. */
     std::remove((paths.config + "/sources.json").c_str());
     remote::sync(paths);

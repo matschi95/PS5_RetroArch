@@ -88,6 +88,8 @@ struct Shared
     /* The covers on the console, known without asking the drive: the menu asks for them
      * often, and a drive busy with a download can keep it waiting. */
     std::set<std::string> covers;
+    /* Each source's placed.json, read once. */
+    std::map<std::string, Json> placed_games;
     uint64_t serials = 0;
     bool threads = false;
     bool queue_read = false;
@@ -235,13 +237,12 @@ std::string source_folder(const Shared &s, const std::string &key)
     return s.paths.config + "/" + key;
 }
 
-/* A cover on the console: its picture's kind told by its first bytes. */
-std::string cover_path(const Shared &s, const std::string &source, const std::string &id,
-                       const std::string &picture = {})
+/* A cover on the console, in its source's folder: its picture's kind told by its first bytes. */
+std::string cover_path(const std::string &folder, const std::string &id, const std::string &picture)
 {
     const bool jpeg = picture.size() > 2 && static_cast<unsigned char>(picture[0]) == 0xff &&
                       static_cast<unsigned char>(picture[1]) == 0xd8;
-    return source_folder(s, source) + "/covers/" + safe(id) + (jpeg ? ".jpg" : ".png");
+    return folder + "/covers/" + safe(id) + (jpeg ? ".jpg" : ".png");
 }
 
 /* The cover of a game that is on the console, either kind; "" without one. */
@@ -401,27 +402,30 @@ void load_queue(Shared &s)
 
 /* Where each source's downloaded games are: config/remote/<source>/placed.json, the game's
  * folder by its id (a folder of the same name that was there already makes it another). */
-Json read_placed(const Shared &s, const std::string &source)
+Json &placed_of(Shared &s, const std::string &source)
 {
+    auto found = s.placed_games.find(source);
+    if (found != s.placed_games.end())
+        return found->second;
     std::string text_;
     Json placed;
     if (!files::read(source_folder(s, source) + "/placed.json", &text_) ||
         !Json::parse(text_, &placed) || placed.kind != Json::object)
-        return Json::record();
-    return placed;
+        placed = Json::record();
+    return s.placed_games[source] = std::move(placed);
 }
 
-void write_placed(const Shared &s, const std::string &source, const Json &placed)
+void write_placed(Shared &s, const std::string &source)
 {
     files::make_folders(source_folder(s, source));
-    if (!files::write(source_folder(s, source) + "/placed.json", placed.write(true)))
+    if (!files::write(source_folder(s, source) + "/placed.json", placed_of(s, source).write(true)))
         log("could not write placed.json of " + source);
 }
 
 /* The folder a game of a source is in on the console; "" when it is not there. */
-std::string folder_of(const Shared &s, const std::string &source, const std::string &id)
+std::string folder_of(Shared &s, const std::string &source, const std::string &id)
 {
-    const std::string folder = text(read_placed(s, source), id.c_str());
+    const std::string folder = text(placed_of(s, source), id.c_str());
     return !folder.empty() && files::is_folder(folder) ? folder : std::string();
 }
 
@@ -532,7 +536,7 @@ class FileWriter final : public Writer
     }
     bool finish(std::string *error) override
     {
-        const bool closed = std::fclose(file_) == 0;
+        const bool closed = file_ && std::fclose(file_) == 0;
         file_ = nullptr;
         if (!closed)
             *error = "Cannot write the file (is the drive full?)";
@@ -630,9 +634,9 @@ Outcome download_part(Source &source, const Paths &paths, const Game &game, cons
         *error = "Cannot write to " + files::parent(staged);
         return Outcome::failed;
     }
+    /* A file of its full size is gone on with as well: after a power cut, its end may not hold
+     * what was written there. */
     int64_t existing = files::size(staged);
-    if (existing >= 0 && part.size > 0 && static_cast<uint64_t>(existing) == part.size)
-        return Outcome::done;
     if (existing < 0 || (part.size > 0 && static_cast<uint64_t>(existing) > part.size))
     {
         (void)std::remove(staged.c_str());
@@ -705,9 +709,8 @@ bool place_game(Shared &s, const Game &game, Placed *placed, std::string *error)
     }
     (void)rmdir((paths.downloads + "/" + safe(game.source)).c_str());
     (void)rmdir(paths.downloads.c_str());
-    Json all = read_placed(s, game.source);
-    all.set(game.id, Json::of(folder));
-    write_placed(s, game.source, all);
+    placed_of(s, game.source).set(game.id, Json::of(folder));
+    write_placed(s, game.source);
     placed->game = game;
     placed->folder = folder;
     placed->launch = folder + "/" + game.file;
@@ -823,6 +826,8 @@ void *list_thread(void *)
         for (const Game &game : state->games)
             if (!game.cover_source.empty() && kept_cover(s, key, game.id).empty())
                 covers.push_back(game);
+        /* Where they go, while the lock is held (start sets the paths again). */
+        const std::string folder = source_folder(s, key);
         lock.unlock();
         std::vector<std::string> written;
         for (const Game &game : covers)
@@ -832,7 +837,7 @@ void *list_thread(void *)
             std::string picture;
             if (!source->cover(as_source_game(game), &picture, [&s] { return s.halt.load(); }))
                 continue;
-            const std::string path = cover_path(s, key, game.id, picture);
+            const std::string path = cover_path(folder, game.id, picture);
             if (files::make_folders(files::parent(path)) && files::write(path, picture))
                 written.push_back(path);
             else
@@ -1209,12 +1214,15 @@ void list_new(const Paths &paths, unsigned timeout)
         state->online = read_;
         state->error = read_ ? "" : error;
         state->listed_at = Clock::now();
+        state->games.clear();
         if (!read_)
         {
+            /* Its (empty) list is kept: the next start does not wait for it again, the list
+             * thread tries it once RetroArch is up. */
             log(state->name + ": " + error);
+            save_catalog(s, *state);
             continue;
         }
-        state->games.clear();
         for (const SourceGame &from : listed)
         {
             Game game;
@@ -1467,5 +1475,14 @@ std::string placed_folder(const std::string &source, const std::string &id)
     Shared &s = state();
     std::lock_guard<std::mutex> lock(s.lock);
     return folder_of(s, source, id);
+}
+
+void forget(const std::string &source, const std::string &id)
+{
+    Shared &s = state();
+    std::lock_guard<std::mutex> lock(s.lock);
+    placed_of(s, source).erase(id);
+    write_placed(s, source);
+    ++s.generation;
 }
 } // namespace ps5::remote

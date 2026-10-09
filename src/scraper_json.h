@@ -54,8 +54,12 @@ struct Json
 
     static Json parse(const std::string &input)
     {
+        /* As the scraper always read it: what follows the value is not looked at. */
+        size_t at = 0;
         Json out;
-        return parse(input, &out) ? out : Json();
+        if (!read(input, at, out, 0))
+            return Json();
+        return out;
     }
     /* The same, saying whether the whole input is JSON (null is not malformed input). */
     static bool parse(const std::string &input, Json *out)
@@ -214,7 +218,8 @@ struct Json
             out += flag ? "true" : "false";
             return;
         case number:
-            out += str();
+            /* NaN and the infinities are no JSON numbers. */
+            out += value == value && value - value == 0 ? str() : "null";
             return;
         case string:
             out += quote(text);

@@ -88,7 +88,7 @@ class OffloadWriter final : public Writer
     }
     bool finish(std::string *error) override
     {
-        const bool whole = ps5_offload_end(stream_) == 0;
+        const bool whole = stream_ && ps5_offload_end(stream_) == 0;
         stream_ = nullptr;
         if (!whole)
             *error = "The console's FTP server could not write the file (is the drive full?)";
@@ -148,7 +148,7 @@ class TitleServices final : public ui::Services
             return false;
         }
         note_removed(Paths::title(), game.platform, folder + "/" + game.file);
-        changed();
+        forget(game.source, game.id);
         return true;
     }
     std::string play(const Game &, const std::string &launch, const std::string &core) override

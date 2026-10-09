@@ -235,4 +235,6 @@ bool enqueue(const std::string &source, const std::string &id, bool first);
 bool cancel(const std::string &source, const std::string &id);
 /* The game's folder on the console, when it is there ("" else). */
 std::string placed_folder(const std::string &source, const std::string &id);
+/* A game downloaded from a source was deleted from the console: it is the source's again. */
+void forget(const std::string &source, const std::string &id);
 } // namespace ps5::remote

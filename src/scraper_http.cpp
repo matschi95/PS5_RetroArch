@@ -399,7 +399,12 @@ Response Http::perform(const Request &request, int fd,
     const std::string host = origin(request.url);
     for (int attempt = 0; attempt < 2; ++attempt)
     {
+        /* Each attempt answers for itself: the first one's error is not the second's. */
+        response = Response();
         int &connection = state_->connections[host];
+        /* Only a connection kept from before is tried again: a fresh one that failed would
+         * fail again, and its wait (a server that does not answer) would be twice as long. */
+        const bool reused = connection > 0;
         if (connection <= 0)
             connection = sceHttpCreateConnectionWithURL(state_->templ, request.url.c_str(), 1);
         if (connection < 0)
@@ -437,6 +442,8 @@ Response Http::perform(const Request &request, int fd,
             sceHttpDeleteRequest(id);
             sceHttpDeleteConnection(connection);
             state_->connections.erase(host);
+            if (!reused)
+                return response;
             continue;
         }
         // On the heap: a payload's threads have small stacks (a 64 KiB frame overflowed
