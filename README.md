@@ -243,10 +243,10 @@ files and the save sync alike; an older one is refused, and **Downloads** shows 
   in **[Remote]** (`"marker"` in `sources.json` changes it), and the server's cover
   is their box art. A game on several servers is listed once, and one already on the
   console (the same checksum, file name or name) is not offered.
-- **Play:** choosing a game downloads it, after asking which server when several
-  have it, and starts it with its system's core once it is all there; afterwards you
-  are back where you chose it. **Circle** keeps it downloading in the background,
-  **Square** cancels.
+- **Download:** choosing a game downloads it, after asking which server when several
+  have it. Once it is all there you are back where you chose it, and the game is in
+  its system's own list, without **[Remote]**: start it from there like any other.
+  **Circle** keeps it downloading in the background, **Square** cancels.
 - **Downloads:** the playlist *Remote* has **Downloads**: each server and whether it
   answered, the download queue (try a failed download again, cancel), and the games
   downloaded, which **Square** twice deletes from the console (their saves stay). The
@@ -255,7 +255,7 @@ files and the save sync alike; an older one is refused, and **Downloads** shows 
 - **Where games go:** the folder in `content/` named after the system (`SNES`, `PS1`,
   `Saturn`...), else `content/<system>/`, a folder per game with the server's files,
   so a disc game keeps its `.cue`, `.bin` and `.m3u` together. A downloaded game moves
-  into the system's own playlist at the next start.
+  into the system's own playlist at once.
 - **Written by the console's FTP server:** a title that writes gigabytes itself gets
   slower and slower, while an FTP server on the console (ftpsrv, etaHEN's...), another
   process, keeps its speed. So downloads need one running; without one they fail and
@@ -304,11 +304,8 @@ by their file names); each kind of server is a backend (`src/remote/save_store.h
   *devices.read/write*. `"states": false` keeps the save states on the console,
   `"auto": false` turns the sync off.
 - **Before a game:** its save data is synced as it loads, before RetroArch reads the
-  save. Started from RetroArch's menu, nothing is asked: what cannot be done then (the
-  server does not answer, both sides changed) is left as it is and a notice says so.
-  Started from a server game's entry, a dialog shows it, asks which one stays when both
-  sides changed, and offers **Play anyway**, **Try again** or **Back** when the server
-  cannot be reached.
+  save. Nothing is asked: what cannot be done then (the server does not answer, both
+  sides changed) is left as it is and a notice says so.
 - **After a game:** its save data goes up in the background with a notice, and is tried
   again at later starts until it worked.
 - **Nothing lost:** which side changed is told by the files' contents, not by the times

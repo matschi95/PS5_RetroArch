@@ -1,5 +1,5 @@
 /* PS5 RetroArch - what the remote core's screens (src/remote/ui/remote_ui.h) use: the
- * download sources, and what the title does for them (start a game, delete one).
+ * download sources, and what the title does for them (delete a game, the save sync's setup).
  *
  * Copyright (C) 2026 Mario Reisinger
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -44,20 +44,6 @@ class Services
     virtual std::string placed(const std::string &source, const std::string &id) = 0;
     /* Deletes a downloaded game from the console: its folder (its saves stay). */
     virtual bool remove(const Game &game, const std::string &folder, std::string *error) = 0;
-    /* Has game mode run a downloaded game with its platform's core; returns only when that did
-     * not happen, with why. */
-    virtual std::string play(const Game &game, const std::string &launch,
-                             const std::string &core) = 0;
-    /* The save sync before a game starts from here (src/remote/save_jobs.h): whether its save
-     * data syncs first (a server is set, and the game was played on the console before),
-     * the sync on its thread, where it is, the player's choice in a conflict, stopping it,
-     * and done with it. */
-    virtual bool sync_wanted(const std::string &launch) = 0;
-    virtual void sync_start(const std::string &launch) = 0;
-    virtual SyncView sync_view() = 0;
-    virtual void sync_choose(SyncChoice choice) = 0;
-    virtual void sync_stop() = 0;
-    virtual void sync_end() = 0;
     /* The Save sync screen: the settings, a pairing with one of setup's servers on its thread
      * (pairing.h), where it is, cancelling it, and unlinking the server. */
     virtual SaveSetup save_setup() = 0;

@@ -15,7 +15,8 @@
  * main_ps5.cpp takes the result before ES-DE starts, and ES-DE's start
  * (patches/0001, ViewController::goToStart) asks ps5_esde_game_return for it: it
  * counts the play, adds the time RetroArch ran, and opens that system's game list
- * on that game.
+ * on that game. A game that is gone, replaced by the file the result names (a
+ * download in place of the stub that stood for it), is that file there.
  */
 #include "ps5_game.h"
 
@@ -66,6 +67,10 @@ extern "C" int ps5_esde_game_return(char *system, size_t system_size, char *path
         return 0;
     std::snprintf(system, system_size, "%.*s", static_cast<int>(tab - returned.state), returned.state);
     std::snprintf(path, path_size, "%s", tab + 1);
+    if (std::FILE *there = std::fopen(path, "rb"))
+        std::fclose(there);
+    else if (returned.content[0])
+        std::snprintf(path, path_size, "%s", returned.content);
     *seconds = returned.seconds;
     *status = returned.status;
     std::snprintf(error, error_size, "%s", returned.error);

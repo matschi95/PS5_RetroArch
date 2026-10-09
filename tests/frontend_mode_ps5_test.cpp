@@ -352,19 +352,16 @@ int main(int argc, char **argv)
     assert(back.status == 0 && back.seconds >= 0 && core == back.core &&
            std::string(back.state) == "snes\tgame.zip");
     assert(!ps5::frontend_mode::running_game());
-    /* A game RetroArch's menu asked for (a download source's, downloaded first) goes back to
-     * the menu, not to the picker. */
-    touch(paths.eboot, true);
-    {
-        struct ps5_game game = {};
-        std::snprintf(game.core, sizeof(game.core), "%s", core.c_str());
-        std::snprintf(game.content, sizeof(game.content), "%s", content.c_str());
-        std::snprintf(game.frontend, sizeof(game.frontend), "%s", paths.eboot.c_str());
-        assert(ps5_game_write(paths.request.c_str(), &game, 0) == 0);
-    }
+    /* A game that is another file now (a download in place of its stub): the result names
+     * that one, for the frontend to go back to it. */
+    request(core.c_str(), content.c_str());
     assert(launch(paths, {"--ps5-mode=game"}) == "retroarch");
-    assert(quit("") == paths.eboot && exec_argument == "--ps5-mode=retroarch");
-    result();
+    ps5::frontend_mode::replace_game("/app0/content/snes/Game/Game.sfc");
+    assert(quit("") == frontend);
+    back = result();
+    assert(std::string(back.content) == "/app0/content/snes/Game/Game.sfc" &&
+           std::string(back.state) == "snes\tgame.zip");
+    ps5::frontend_mode::replace_game("/elsewhere"); /* no game: nothing to replace */
 
     /* An update installed as RetroArch quit: no handover, in game mode or from the picker. */
     request(core.c_str(), content.c_str());

@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <ctime>
 
 namespace ps5::remote::ui
 {
@@ -18,6 +17,8 @@ namespace
 {
 /* How long a message stands. */
 constexpr double message_seconds = 4.0;
+/* How long "Downloaded" stands before the download screen ends. */
+constexpr double done_seconds = 2.0;
 /* The panel every screen draws on. */
 constexpr int panel_x = 80, panel_y = 40, panel_width = frame_width - 160,
               panel_height = frame_height - 80;
@@ -143,162 +144,6 @@ class SourceDialog
     size_t focus_ = 0;
 };
 
-/* ---------------------------------------------------------------- the save sync */
-/* "2026-10-08 14:30", the console's time of day; "not known" for none. */
-std::string time_text(int64_t seconds)
-{
-    if (seconds <= 0)
-        return "not known";
-    const std::time_t time = std::time_t(seconds);
-    std::tm local{};
-    localtime_r(&time, &local);
-    char out[32];
-    std::strftime(out, sizeof out, "%Y-%m-%d %H:%M", &local);
-    return out;
-}
-
-/* A game's save data synced before it starts: what it is doing, the player's choice when both
- * sides changed, and what to do when it could not be synced. */
-class SyncDialog
-{
-  public:
-    enum Result
-    {
-        asking,
-        play, /* synced, or the player plays without */
-        back, /* without the game */
-    };
-    SyncDialog(Services &services, std::string launch, std::string game)
-        : services_(services), launch_(std::move(launch)), game_(std::move(game))
-    {
-        services_.sync_start(launch_);
-    }
-
-    Result input(uint32_t pressed)
-    {
-        const SyncView view = services_.sync_view();
-        const std::vector<std::string> choices = options(view);
-        if (view.stage != stage_)
-            focus_ = 0;
-        stage_ = view.stage;
-        if (!choices.empty())
-        {
-            if (pressed & up)
-                focus_ = (focus_ + choices.size() - 1) % choices.size();
-            if (pressed & down)
-                focus_ = (focus_ + 1) % choices.size();
-        }
-        switch (view.stage)
-        {
-        case SyncView::working:
-            if (pressed & circle)
-            {
-                services_.sync_stop(); /* what it sends stops; nothing more changes */
-                return back;
-            }
-            break;
-        case SyncView::conflict:
-            if (pressed & cross)
-                services_.sync_choose(focus_ == 0   ? SyncChoice::console
-                                      : focus_ == 1 ? SyncChoice::server
-                                                    : SyncChoice::neither);
-            break;
-        case SyncView::failed:
-            if (pressed & circle)
-            {
-                services_.sync_end();
-                return back;
-            }
-            if (pressed & cross)
-            {
-                const std::string &choice = choices[focus_];
-                services_.sync_end();
-                if (choice == "Try again")
-                {
-                    services_.sync_start(launch_);
-                    stage_ = SyncView::working; /* asked anew, from the first choice */
-                    focus_ = 0;
-                    return asking;
-                }
-                return choice == "Back" ? back : play;
-            }
-            break;
-        case SyncView::done:
-            services_.sync_end();
-            return play;
-        case SyncView::idle:
-            return play; /* nothing to sync after all */
-        }
-        return asking;
-    }
-
-    void draw(Canvas &c) const
-    {
-        const SyncView view = services_.sync_view();
-        panel(c, game_, view.server.empty() ? "Save sync" : "Save sync with " + view.server);
-        int y = panel_y + 136;
-        switch (view.stage)
-        {
-        case SyncView::conflict:
-            c.text(inner_x, y, "The save data changed here and on the server", color::warning);
-            y = c.block(inner_x, y + 34,
-                        view.file + ": which one stays? The other one is kept as a backup.",
-                        color::text, inner_width);
-            c.text(inner_x, y + 10, "This console's: " + time_text(view.console_time), color::meta);
-            c.text(inner_x, y + 36,
-                   "The server's: " + time_text(view.server_time) +
-                       (view.server_device.empty() ? "" : " (" + view.server_device + ")"),
-                   color::meta);
-            y += 76;
-            break;
-        case SyncView::failed:
-            c.text(inner_x, y, "The save data could not be synced", color::warning);
-            y = c.block(inner_x, y + 34,
-                        view.too_old
-                            ? "RomM " + view.server_version + " is too old: it needs RomM " +
-                                  view.needed_version + " or newer."
-                            : view.error,
-                        color::meta, inner_width) +
-                24;
-            break;
-        default:
-            c.text(inner_x, y, "Syncing the save data...", color::text);
-            c.block(inner_x, y + 40, "The game starts when it is done.", color::meta, inner_width);
-            break;
-        }
-        const std::vector<std::string> choices = options(view);
-        for (size_t i = 0; i < choices.size(); i++)
-        {
-            if (i == focus_)
-                c.fill(inner_x - 12, y - 6, inner_width + 24, 32, color::focus);
-            c.text(inner_x, y, choices[i], color::title);
-            y += 36;
-        }
-        if (view.stage == SyncView::working)
-            hints(c, "Circle: back without the game");
-        else if (view.stage == SyncView::conflict)
-            hints(c, "Cross: choose");
-        else
-            hints(c, "Cross: choose    Circle: back");
-    }
-
-  private:
-    static std::vector<std::string> options(const SyncView &view)
-    {
-        if (view.stage == SyncView::conflict)
-            return {"Keep this console's", "Take the server's", "Change nothing"};
-        if (view.stage == SyncView::failed)
-            return view.too_old ? std::vector<std::string>{"Play anyway", "Back"}
-                                : std::vector<std::string>{"Play anyway", "Try again", "Back"};
-        return {};
-    }
-
-    Services &services_;
-    std::string launch_, game_;
-    SyncView::Stage stage_ = SyncView::idle;
-    size_t focus_ = 0;
-};
-
 /* ---------------------------------------------------------------- the download dialog */
 class DownloadScreen final : public Screen
 {
@@ -316,7 +161,7 @@ class DownloadScreen final : public Screen
             message_.say(services, "The sources no longer have this game.", true);
             return;
         }
-        /* Downloaded already (the playlists take it at the next start): it starts. */
+        /* Downloaded already (a frontend that has not read its list again since): said so. */
         for (const Game &game : title_.games)
             if (const std::string folder = services.placed(game.source, game.id); !folder.empty())
             {
@@ -342,17 +187,6 @@ class DownloadScreen final : public Screen
 
     void input(uint32_t pressed) override
     {
-        if (sync_)
-        {
-            const SyncDialog::Result result = sync_->input(pressed);
-            if (result != SyncDialog::asking)
-            {
-                sync_.reset();
-                synced_ = true;
-                finished_ = result == SyncDialog::back;
-            }
-            return;
-        }
         if (sources_)
         {
             bool back = false;
@@ -378,31 +212,14 @@ class DownloadScreen final : public Screen
         }
         if (!chosen_.id.empty() && (pressed & cross) && failed_)
             choose(chosen_); /* tried again */
-        /* Once "Starting the game..." was drawn: game mode runs it (this returns only when that
-         * did not happen). */
-        if (ready_ && !played_)
-        {
-            /* Its save data first, when it syncs: the sync's own dialog. */
-            const std::string launch = folder_ + "/" + chosen_.file;
-            if (!synced_ && services_.sync_wanted(launch))
-            {
-                sync_.reset(new SyncDialog(services_, launch, chosen_.name));
-                return;
-            }
-            played_ = true;
-            play_error_ = services_.play(chosen_, folder_ + "/" + chosen_.file, stub_.core);
-            if (play_error_.empty())
-                play_error_ = "game mode did not start";
-        }
+        /* Downloaded: the screen ends once that was seen, and the game is in its system's list
+         * as the core closes (the title's ps5_remote_core_closed), to be started from there. */
+        if (done_at_ >= 0 && services_.now() - done_at_ >= done_seconds)
+            finished_ = true;
     }
 
     void draw(Canvas &c) override
     {
-        if (sync_)
-        {
-            sync_->draw(c);
-            return;
-        }
         if (sources_)
         {
             sources_->draw(c, services_);
@@ -420,8 +237,10 @@ class DownloadScreen final : public Screen
         if (!folder_.empty())
         {
             share = 1;
-            state = play_error_.empty() ? "Starting the game..." : "The game could not be started";
-            ready_ = true;
+            state = "Downloaded";
+            detail_ = "It is in its system's list now, to be started from there.";
+            if (done_at_ < 0)
+                done_at_ = services_.now();
         }
         else if (!chosen_.id.empty())
         {
@@ -462,8 +281,7 @@ class DownloadScreen final : public Screen
                 state = other.empty() ? "Waiting to download" : "Waiting for " + other;
             }
         }
-        draw_progress(c, state, share,
-                      failed_ ? detail_ : (folder_.empty() ? detail_ : play_error_));
+        draw_progress(c, state, share, detail_);
         message_.draw(c, services_);
         if (failed_)
             hints(c, "Cross: try again    Square: cancel    Circle: back");
@@ -505,7 +323,7 @@ class DownloadScreen final : public Screen
         if (!detail.empty())
             c.block(inner_x, panel_y + 226, detail, color::meta, inner_width);
         if (!chosen_.id.empty() && folder_.empty() && !failed_)
-            c.text(inner_x, panel_y + 320, "The game starts when the download is done.",
+            c.text(inner_x, panel_y + 320, "It is in its system's list when the download is done.",
                    color::meta);
     }
 
@@ -513,11 +331,10 @@ class DownloadScreen final : public Screen
     Stub stub_;
     Title title_;
     std::unique_ptr<SourceDialog> sources_;
-    std::unique_ptr<SyncDialog> sync_;
-    bool synced_ = false; /* its save data synced, or the player plays without */
     Game chosen_;
-    std::string folder_, detail_, play_error_;
-    bool ready_ = false, played_ = false, failed_ = false, finished_ = false;
+    std::string folder_, detail_;
+    double done_at_ = -1; /* when it was seen downloaded */
+    bool failed_ = false, finished_ = false;
     Message message_;
 };
 
@@ -580,8 +397,8 @@ class DownloadsScreen final : public Screen
                 std::string error;
                 armed_.clear();
                 if (services_.remove(row.game, row.folder, &error))
-                    message_.say(services_, "Deleted. It is listed on its sources again at the "
-                                            "next start.");
+                    message_.say(services_, "Deleted. It is listed on its sources again once "
+                                            "you leave Downloads.");
                 else
                     message_.say(services_, "Could not delete it: " + error, true);
             }

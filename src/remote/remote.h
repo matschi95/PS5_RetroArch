@@ -213,7 +213,7 @@ void read(const Paths &paths);
 void list_new(const Paths &paths, unsigned timeout);
 /* read(), the kept queue, and lets the threads run: a source's list is read when it was not
  * yet, or long ago, and the queue goes on. Called whenever RetroArch's menu is up. placed:
- * told of each game put in its place (the playlists take it at the next start). */
+ * told of each game put in its place (for the playlists, library.h). */
 void start(const Paths &paths, PlacedNote placed);
 /* Stops the threads before a game starts: a download stops (its file stays, for later),
  * nothing is read from the network while the game runs. Waits a moment for the transfer to

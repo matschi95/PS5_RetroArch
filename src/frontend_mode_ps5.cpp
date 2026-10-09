@@ -319,6 +319,12 @@ const struct ps5_game *running_game()
     return game_running ? &game : nullptr;
 }
 
+void replace_game(const char *content)
+{
+    if (game_running && content && *content)
+        std::snprintf(game.content, sizeof game.content, "%s", content);
+}
+
 bool back_to_picker(const std::string &mode, bool picker_present)
 {
     return mode == "retroarch" && picker_present;
@@ -349,10 +355,7 @@ void after_retroarch(const Paths &paths, const std::string &mode, int status,
         ps5::debug::mark(line);
         if (ps5_game_write(paths.result.c_str(), &game, 1) != 0)
             ps5::debug::mark("game mode: the result could not be written");
-        /* A game RetroArch's menu asked for (a download source's, downloaded first:
-         * src/remote/remote.h) goes back to the menu. */
-        restart_as(game.frontend, paths.eboot == game.frontend ? "--ps5-mode=retroarch" : "",
-                   replaced_wait_seconds,
+        restart_as(game.frontend, replaced_wait_seconds,
                    "game mode: LoadExec of the frontend did not replace the process; the title "
                    "closes; result");
         return;
@@ -404,6 +407,11 @@ extern "C" const char *ps5_frontend_retroarch_log(void)
 extern "C" const struct ps5_game *ps5_frontend_game(void)
 {
     return ps5::frontend_mode::running_game();
+}
+
+extern "C" void ps5_frontend_game_replaced(const char *content)
+{
+    ps5::frontend_mode::replace_game(content);
 }
 
 extern "C" void ps5_frontend_after_retroarch(int status, int update_installed)

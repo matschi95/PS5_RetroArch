@@ -103,46 +103,6 @@ class SampleServices final : public ui::Services
         placed_id.clear();
         return true;
     }
-    std::string play(const remote::Game &, const std::string &launch,
-                     const std::string &core) override
-    {
-        played.push_back(launch + " with " + core);
-        return "LoadExec refused";
-    }
-    bool sync_wanted(const std::string &) override
-    {
-        return sync_on;
-    }
-    void sync_start(const std::string &launch) override
-    {
-        synced.push_back("start " + launch);
-        sync = remote::SyncView();
-        sync.stage = remote::SyncView::working;
-        sync.before = true;
-        sync.game = "Chrono Trigger";
-        sync.server = "alex @ http://192.168.1.20:3000";
-    }
-    remote::SyncView sync_view() override
-    {
-        return sync;
-    }
-    void sync_choose(remote::SyncChoice choice) override
-    {
-        synced.push_back(choice == remote::SyncChoice::console  ? "console"
-                         : choice == remote::SyncChoice::server ? "server"
-                                                                : "neither");
-        sync.stage = remote::SyncView::working;
-    }
-    void sync_stop() override
-    {
-        synced.push_back("stop");
-        sync = remote::SyncView();
-    }
-    void sync_end() override
-    {
-        synced.push_back("end");
-        sync = remote::SyncView();
-    }
     ui::SaveSetup save_setup() override
     {
         return setup;
@@ -178,11 +138,9 @@ class SampleServices final : public ui::Services
     remote::Status status_;
     std::vector<remote::Title> titles_;
     std::vector<remote::Download> downloads_;
-    std::vector<std::string> enqueued, cancelled, removed, played, synced, paired;
+    std::vector<std::string> enqueued, cancelled, removed, paired;
     ui::SaveSetup setup;
     remote::PairingRun::View pairing_view;
-    bool sync_on = false;
-    remote::SyncView sync;
     std::string placed_id = "71";
     int refreshed = 0;
     double clock = 100;
@@ -284,78 +242,27 @@ int main(int argc, char **argv)
         screen->input(ui::cross);
         assert(services.enqueued.size() == 2 && !screen->finished());
     }
-    /* Downloaded already: it starts once "Starting the game..." is up (not while it is
-     * drawn); a start that fails says so. */
+    /* Downloaded: said, and the screen ends a moment later (the game is in its system's
+     * list then, started from there); Circle ends it at once. */
     {
         SampleServices services;
+        services.placed_id.clear();
         auto screen = ui::open(stub_of({{"home", "71"}}), services);
+        assert(services.enqueued.size() == 1);
+        services.placed_id = "71";
         screen->input(0);
-        assert(services.played.empty());
-        shot(*screen, "14-starting");
-        assert(services.played.empty());
+        shot(*screen, "14-downloaded");
         screen->input(0);
-        assert(services.played.size() == 1 &&
-               services.played[0] == "/app0/content/SNES/Chrono Trigger/Chrono Trigger.sfc with "
-                                     "/app0/cores/snes9x_libretro.so");
-        shot(*screen, "15-not-started");
+        assert(!screen->finished());
+        services.clock += 2.5;
         screen->input(0);
-        assert(services.played.size() == 1); /* once */
-    }
-    /* Its save data synced first, when it syncs: the dialog, a conflict and the player's
-     * choice; then the game starts. */
-    {
-        SampleServices services;
-        services.sync_on = true;
-        auto screen = ui::open(stub_of({{"home", "71"}}), services);
-        screen->input(0);
-        shot(*screen, "14-starting");
-        screen->input(0); /* the sync begins instead of the game */
-        assert(services.played.empty() && services.synced.size() == 1 &&
-               services.synced[0] == "start /app0/content/SNES/Chrono Trigger/Chrono Trigger.sfc");
-        shot(*screen, "17-syncing");
-        services.sync.stage = remote::SyncView::conflict;
-        services.sync.file = "Chrono Trigger.srm";
-        services.sync.console_time = 1791462896;
-        services.sync.server_time = 1791376496;
-        services.sync.server_device = "Steam Deck";
-        screen->input(0);
-        shot(*screen, "18-conflict");
-        screen->input(ui::down);
-        screen->input(ui::cross);
-        assert(services.synced.back() == "server" && services.played.empty());
-        services.sync.stage = remote::SyncView::done;
-        screen->input(0); /* done: the game starts */
-        screen->input(0);
-        assert(services.played.size() == 1);
-    }
-    /* Not synced (the server does not answer): play anyway, try again or back. */
-    {
-        SampleServices services;
-        services.sync_on = true;
-        auto screen = ui::open(stub_of({{"home", "71"}}), services);
-        shot(*screen, "14-starting");
-        screen->input(0);
-        services.sync.stage = remote::SyncView::failed;
-        services.sync.error = "The server did not answer (network or DNS).";
-        screen->input(0);
-        shot(*screen, "19-sync-failed");
-        screen->input(ui::down);
-        screen->input(ui::cross); /* try again */
-        assert(services.synced.back() ==
-               "start /app0/content/SNES/Chrono Trigger/Chrono Trigger.sfc");
-        services.sync.stage = remote::SyncView::failed;
-        screen->input(0);
-        screen->input(ui::cross); /* play anyway */
-        screen->input(0);
-        assert(services.played.size() == 1);
-        /* Back while it syncs: without the game. */
+        assert(screen->finished());
         SampleServices other;
-        other.sync_on = true;
-        auto again = ui::open(stub_of({{"home", "71"}}), other);
-        shot(*again, "14-starting");
-        again->input(0);
+        auto again = ui::open(stub_of({{"home", "71"}}), other); /* downloaded already */
+        assert(other.enqueued.empty());
+        shot(*again, "14-downloaded");
         again->input(ui::circle);
-        assert(other.synced.back() == "stop" && again->finished() && other.played.empty());
+        assert(again->finished());
     }
     /* A stub of a game the sources no longer have. */
     {

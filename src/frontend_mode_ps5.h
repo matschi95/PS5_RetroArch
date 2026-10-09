@@ -66,6 +66,9 @@ const char *name(Next next);
 void run(const Paths &paths, int argc, char **argv, unsigned replaced_wait_seconds);
 /* In game mode, the game RetroArch is to run; nullptr otherwise. */
 const struct ps5_game *running_game();
+/* In game mode, the game RetroArch ran is another file now (a download in place of the stub
+ * that stood for it): the frontend's result names that one. */
+void replace_game(const char *content);
 /* After RetroArch has quit: true when the title goes back to the picker instead of
  * closing, which it does when the picker started RetroArch (--ps5-mode=retroarch). */
 bool back_to_picker(const std::string &mode, bool picker_present);
@@ -88,6 +91,8 @@ extern "C"
     void ps5_frontend_dispatch(int argc, char **argv);
     /* In game mode, the game RetroArch runs (its core and content); NULL otherwise. */
     const struct ps5_game *ps5_frontend_game(void);
+    /* In game mode, the game is another file now (frontend_mode::replace_game). */
+    void ps5_frontend_game_replaced(const char *content);
     /* RetroArch's log for this launch (after the dispatch), the previous one kept. */
     const char *ps5_frontend_retroarch_log(void);
     /* Called once RetroArch has quit with status, before the title closes;

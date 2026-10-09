@@ -19,13 +19,19 @@
  *
  * Firmware (src/remote/firmware.h): as a game's core loads, what its info names and its
  * system folder lacks comes from the sources that listed it (ps5_remote_core_opening).
+ *
+ * The remote core only downloads: once it closed, what it downloaded goes into its system's
+ * playlist at once (library.h, sync), and RetroArch's menu reads its playlists again; in game
+ * mode the frontend goes back to the downloaded game in place of its stub. The game is then
+ * started from there as any other, in this RetroArch, so nothing restarts the title under
+ * RetroArch's feet.
  */
 #include "remote_core.h"
 
 #include "../frontend_mode_ps5.h"
-#include "../ps5_game.h"
 #include "../ps5_library.h"
 #include "configuration.h"
+#include "playlist.h"
 #include "files.h"
 #include "library.h"
 #include "remote.h"
@@ -36,12 +42,17 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <memory>
 #include <mutex>
 #include <ps5platform/offload.h>
 #include <queues/message_queue.h>
+#include <queues/task_queue.h>
+#ifdef HAVE_MENU
+#include "menu/menu_driver.h"
+#endif
 #include <unistd.h>
 
 extern "C" const char *ps5_core_system_directory(const char *core, const char *directory);
@@ -223,67 +234,6 @@ class TitleServices final : public ui::Services
         forget(game.source, game.id);
         return true;
     }
-    std::string play(const Game &, const std::string &launch, const std::string &core) override
-    {
-        /* Back to the frontend the game was chosen in: the one that asked game mode for the
-         * stub, or RetroArch's menu. */
-        struct ps5_game request = {};
-        std::snprintf(request.content, sizeof request.content, "%s", launch.c_str());
-        std::snprintf(request.core, sizeof request.core, "%s", core.c_str());
-        if (const struct ps5_game *running = ps5_frontend_game())
-        {
-            std::snprintf(request.frontend, sizeof request.frontend, "%s", running->frontend);
-            std::snprintf(request.state, sizeof request.state, "%s", running->state);
-        }
-        else
-            std::snprintf(request.frontend, sizeof request.frontend, "%s", PS5_GAME_EBOOT);
-        /* Its save data synced here, asking: RetroArch's hook leaves it alone. */
-        if (syncing_.content == launch)
-            save_jobs().synced_launch(launch);
-        /* The game goes into its system's playlist at this restart (src/remote/library.h),
-         * which associates it with the platform's core. */
-        ps5_game_launch(&request);
-        return request.error;
-    }
-    bool sync_wanted(const std::string &launch) override
-    {
-        SyncGame game;
-        return save_jobs().wanted() && save_jobs().known(launch, &game);
-    }
-    void sync_start(const std::string &launch) override
-    {
-        if (!save_jobs().known(launch, &syncing_))
-            syncing_ = SyncGame();
-        waiting_ = true;
-        sync_view();
-    }
-    SyncView sync_view() override
-    {
-        /* Another sync under way (a game's after it ended): this one once it is done. */
-        if (waiting_ && save_jobs().start({syncing_}, true))
-            waiting_ = false;
-        if (!waiting_)
-            return save_jobs().view();
-        SyncView view;
-        view.stage = SyncView::working;
-        view.before = true;
-        view.game = syncing_.name;
-        return view;
-    }
-    void sync_choose(SyncChoice choice) override
-    {
-        save_jobs().choose(choice);
-    }
-    void sync_stop() override
-    {
-        waiting_ = false;
-        syncing_ = SyncGame();
-        save_jobs().stop();
-    }
-    void sync_end() override
-    {
-        save_jobs().end();
-    }
     ui::SaveSetup save_setup() override
     {
         const std::string config = Paths::title().config;
@@ -338,8 +288,6 @@ class TitleServices final : public ui::Services
     }
 
     std::unique_ptr<PairingRun> pairing_;
-    SyncGame syncing_;     /* the game whose save data syncs before it starts from here */
-    bool waiting_ = false; /* its sync is still to start */
 };
 
 /* The save sync's jobs: they live as long as the process (their thread uses them). */
@@ -396,11 +344,73 @@ std::string playing_core;
 
 TitleServices services;
 std::unique_ptr<ui::Screen> screen;
+Stub open_stub; /* the remote core's, while it is open */
+
+/* What was downloaded or deleted goes into the playlists now (library.h, sync), and
+ * RetroArch's menu reads them again, as after a scan: the playlist shown, and the menu's tabs
+ * (a system's playlist may be new). On the main thread, from the task queue. */
+void update_playlists()
+{
+    retro_task_t *task = task_init();
+    if (!task)
+        return;
+    task->handler = [](retro_task_t *done) { task_set_flags(done, RETRO_TASK_FLG_FINISHED, true); };
+    task->callback = [](retro_task_t *, void *, void *, const char *)
+    {
+        sync(Paths::title());
+        if (playlist_t *cached = playlist_get_cached())
+        {
+            playlist_config_t config;
+            if (playlist_config_copy(playlist_get_config(cached), &config))
+            {
+                playlist_free_cached();
+                playlist_init_cached(&config);
+            }
+        }
+#ifdef HAVE_MENU
+        struct menu_state *menu = menu_state_get_ptr();
+        if (menu->driver_ctx && menu->driver_ctx->environ_cb)
+            menu->driver_ctx->environ_cb(MENU_ENVIRON_RESET_HORIZONTAL_LIST, nullptr,
+                                         menu->userdata);
+        menu->flags |= MENU_ST_FLAG_ENTRIES_NEED_REFRESH;
+#endif
+    };
+    if (!task_queue_push(task))
+        std::free(task);
+}
+
+/* The remote core closed: what it downloaded (or deleted) goes into the playlists now. */
+void remote_core_closed(const Stub &stub)
+{
+    if (!ps5_frontend_game())
+    {
+        update_playlists();
+        return;
+    }
+    /* Game mode: RetroArch quits now, so before the frontend starts; it goes back to the game
+     * the stub stood for, where it is now. */
+    sync(Paths::title());
+    for (const auto &wanted : stub.games)
+    {
+        Game game;
+        const std::string folder = placed_folder(wanted.first, wanted.second);
+        if (!folder.empty() && find(wanted.first, wanted.second, &game))
+        {
+            ps5_frontend_game_replaced((folder + "/" + game.file).c_str());
+            return;
+        }
+    }
+}
 
 void start_threads()
 {
     const Paths paths = title_paths();
-    start(paths, [paths](const Placed &placed) { note_placed(paths, placed); });
+    start(paths,
+          [paths](const Placed &placed)
+          {
+              note_placed(paths, placed);
+              update_playlists(); /* in RetroArch's menu now, downloaded in the background */
+          });
 }
 } // namespace
 
@@ -465,7 +475,9 @@ extern "C" void ps5_remote_core_closed(const char *path)
     }
     if (!ended.content.empty())
         save_jobs().played(ended);
-    if (started && !is_remote_core(path))
+    if (started && path && is_remote_core(path))
+        remote_core_closed(open_stub);
+    else if (started)
         start_threads();
 }
 
@@ -474,6 +486,7 @@ extern "C" int ps5_remote_core_open(const char *content)
     Stub stub;
     if (!content || !read_stub(content, &stub))
         return -1;
+    open_stub = stub;
     screen = ui::open(stub, services);
     return 0;
 }
