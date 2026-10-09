@@ -5,6 +5,7 @@
  * the frontends read. argv[1] is a scratch folder.
  */
 #include "../src/ps5_library.h"
+#include "../src/remote/backends.h"
 #include "../src/remote/files.h"
 #include "../src/remote/library.h"
 #include "../src/remote/remote.h"
@@ -108,7 +109,8 @@ class FakeSource final : public remote::Source
 };
 } // namespace
 
-/* The test's backends: "fake", at a server of this file's. */
+/* The test's backends: "fake", at a server of this file's (in place of
+ * src/remote/backends.cpp). */
 std::unique_ptr<remote::Source> ps5::remote::make_source(const std::string &type,
                                                          const Json &settings, std::string *error)
 {

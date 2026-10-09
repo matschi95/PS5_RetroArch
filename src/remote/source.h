@@ -9,8 +9,8 @@
  * only talks to its server.
  *
  * A new backend: a class deriving from Source in a folder of its own
- * (src/remote/<type>/), and the function that makes it in make_source
- * (src/remote/backends.cpp), for its "type" in sources.json.
+ * (src/remote/<type>/), and the function that makes it in its line of backends()
+ * (src/remote/backends.h), for its "type" in sources.json.
  */
 #pragma once
 
@@ -103,8 +103,4 @@ class Source
                        Receiver &receiver, std::string *error) = 0;
 };
 
-/* Makes the source of a "type" from its entry in sources.json. nullptr with *error when
- * the type is unknown or the entry is not usable. */
-std::unique_ptr<Source> make_source(const std::string &type, const Json &settings,
-                                    std::string *error);
 } // namespace ps5::remote

@@ -1,5 +1,5 @@
 /* PS5 RetroArch - download sources (src/remote/remote.h says what they are). Nothing here
- * knows a backend: they are made by make_source (src/remote/backends.cpp) and used through
+ * knows a backend: they are made by make_source (src/remote/backends.h) and used through
  * Source (src/remote/source.h).
  *
  * Copyright (C) 2026 Mario Reisinger
@@ -9,6 +9,7 @@
 
 #include "../ps5_library.h"
 #include "../title_threads.hpp"
+#include "backends.h"
 #include "files.h"
 
 #include <algorithm>

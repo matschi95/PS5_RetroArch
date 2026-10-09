@@ -6,6 +6,8 @@
  */
 #include "../src/remote/files.h"
 #include "../src/remote/remote.h"
+#include "../src/remote/backends.h"
+#include "../src/remote/romm/romm_client.h"
 #include "../src/remote/romm/romm_source.h"
 
 #include <cassert>
@@ -82,9 +84,18 @@ int main(int argc, char **argv)
            romm::normal_url("HTTPS://x/") == "https://x");
     assert(romm::normal_url("ftp://x").empty() && romm::normal_url("").empty());
     {
+        /* The backends by what they can do; a RomM entry read for another file names it. */
+        assert(remote::find_backend("romm") && remote::find_backend("romm")->source &&
+               !remote::find_backend("ftp"));
         std::string error;
+        assert(!remote::make_source("ftp", Json::record(), &error) &&
+               error == "Unknown source type \"ftp\"");
+        assert(!remote::make_source("", Json::record(), &error) &&
+               error == "A source in sources.json has no \"type\"");
         assert(!romm::make_source(Json::parse("{\"type\":\"romm\"}"), &error) &&
                error == "No server address (\"url\") in sources.json");
+        assert(!romm::Client::make(Json::record(), "save-sync.json", &error) &&
+               error == "No server address (\"url\") in save-sync.json");
         std::vector<remote::SourceGame> games;
         assert(!romm::parse_page("{\"items\":{}}", &games) && !romm::parse_page("[]", &games));
     }
