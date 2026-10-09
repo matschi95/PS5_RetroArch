@@ -209,15 +209,18 @@ Presets and overlays are included for offline use. Compatibility varies by core 
 Your collection can stay on a server in your network. Its games are listed in
 RetroArch and in EmulationStation beside the ones on the console, and a game is
 downloaded the first time you play it. Nothing is streamed: once downloaded, a game
-is on the console like any other. Each kind of server is a backend
-(`src/remote/source.h`); several servers can be set up at once.
+is on the console like any other. The supported server is
+[RomM](https://github.com/rommapp/romm) (a current version); each kind of server is a
+backend (`src/remote/source.h`), and several servers can be set up at once.
 
 - **Set up:** save `config/remote/sources.json` over FTP:
   ```json
   { "sources": [
-      { "type": "<backend>", "name": "Home", ...what the backend needs... }
+      { "type": "romm", "name": "Home", "url": "http://192.168.1.20:3000", "token": "rmm_..." }
   ] }
   ```
+  `token` is a RomM client API token (**Profile › Client tokens**); `"username"` and
+  `"password"` work instead, and `"platforms": ["snes", "psx"]` lists only those.
   A server added there is read as the title starts, so its games are there at once
   (a server that does not answer delays that start by 5 seconds, once). While
   RetroArch runs, the lists are read again in the background, at most every 15

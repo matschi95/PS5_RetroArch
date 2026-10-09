@@ -6,12 +6,15 @@
  */
 #include "source.h"
 
+#include "romm/romm_source.h"
+
 namespace ps5::remote
 {
 std::unique_ptr<Source> make_source(const std::string &type, const Json &settings,
                                     std::string *error)
 {
-    (void)settings;
+    if (type == "romm")
+        return romm::make_source(settings, error);
     *error = type.empty() ? "A source in sources.json has no \"type\""
                           : "Unknown source type \"" + type + "\"";
     return nullptr;
