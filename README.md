@@ -467,6 +467,16 @@ import table and build identity depend on the shipped core binaries. Source
 patches live in `patches/`; fetched and generated trees stay in ignored
 `vendor/`, `.deps/`, `build/` and `dist/` directories.
 
+The download sources and the save sync are also checked against real RomM servers
+in Docker: `python3 tools/check-romm.py` starts RomM 5.0.0 (the oldest the save sync
+takes), 5.3.1 and 4.9.0 (to be refused) with a few fake SNES games, and checks the
+listing, downloads checked as they come and gone on with, the save and the save
+states between two consoles, conflicts, pairing and refused tokens
+(`tests/romm_live_test.cpp`). It needs Docker with Compose and is skipped without
+it; the first run of a version downloads its image (about 1 GB). Downloads are
+written there by the host, not by the console's FTP server, whose streams only the
+console has.
+
 </details>
 
 <details>
