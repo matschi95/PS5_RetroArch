@@ -253,6 +253,11 @@ backend (`src/remote/source.h`), and several servers can be set up at once.
   whole game. A download stops while a game runs and when the title closes, and goes on
   where it was (the last 4 MB fetched again in case of a power cut). A cancelled one
   is removed.
+- **Checked as they come:** each file is checked against the CRC32 the server has for it
+  while its bytes stream to the drive, so it is not read again afterwards; a download
+  that goes on reads what it has so far first (*Checking* in the queue). A damaged file
+  is deleted and the download fails saying so; trying again downloads it again. A file
+  the server knows no CRC32 of is taken by its size.
 
 <a id="your-files"></a>
 

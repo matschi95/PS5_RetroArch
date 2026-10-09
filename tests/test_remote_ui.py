@@ -8,7 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 RETROARCH = ROOT / 'vendor/retroarch'
 SOURCES = ['src/remote/ui/remote_ui.cpp', 'src/remote/ui/canvas.cpp', 'src/remote/remote.cpp',
-           'src/remote/files.cpp', 'src/remote/backends.cpp', 'src/remote/romm/romm_source.cpp', 'src/remote/romm/romm_client.cpp',
+           'src/remote/files.cpp', 'src/remote/stream_check.cpp', 'src/remote/backends.cpp', 'src/remote/romm/romm_source.cpp', 'src/remote/romm/romm_client.cpp',
            'src/scraper_http.cpp']
 
 
@@ -23,7 +23,7 @@ class RemoteUi(unittest.TestCase):
             binary = str(Path(td) / 'remote-ui-test')
             subprocess.run(['c++', '-std=c++20', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-exceptions',
                             '-fno-rtti', '-pthread', '-Isrc', '-I' + str(RETROARCH), 'tests/remote_ui_test.cpp',
-                            *SOURCES, library, '-o', binary], cwd=ROOT, check=True)
+                            *SOURCES, library, '-lz', '-o', binary], cwd=ROOT, check=True)
             subprocess.run([binary], cwd=ROOT, check=True, timeout=60)
 
 

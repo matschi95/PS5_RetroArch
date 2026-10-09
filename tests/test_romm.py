@@ -8,7 +8,7 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = ['src/remote/remote.cpp', 'src/remote/library.cpp', 'src/remote/files.cpp', 'src/remote/backends.cpp',
+SOURCES = ['src/remote/remote.cpp', 'src/remote/library.cpp', 'src/remote/files.cpp', 'src/remote/stream_check.cpp', 'src/remote/backends.cpp',
            'src/remote/romm/romm_source.cpp', 'src/remote/romm/romm_client.cpp', 'src/scraper_http.cpp']
 
 
@@ -20,8 +20,8 @@ class Romm(unittest.TestCase):
                            check=True)
             binary = str(Path(td) / 'romm-test')
             subprocess.run(['c++', '-std=c++20', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-exceptions',
-                            '-fno-rtti', '-pthread', '-Isrc', 'tests/romm_test.cpp', *SOURCES, library, '-o',
-                            binary], cwd=ROOT, check=True)
+                            '-fno-rtti', '-pthread', '-Isrc', 'tests/romm_test.cpp', *SOURCES, library, '-lz',
+                            '-o', binary], cwd=ROOT, check=True)
             port_file = Path(td) / 'port'
             server = subprocess.Popen([sys.executable, str(ROOT / 'tools/romm-mock-server.py'), str(port_file)])
             try:

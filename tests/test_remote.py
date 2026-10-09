@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = ['src/remote/remote.cpp', 'src/remote/library.cpp', 'src/remote/files.cpp']
+SOURCES = ['src/remote/remote.cpp', 'src/remote/library.cpp', 'src/remote/files.cpp', 'src/remote/stream_check.cpp']
 
 
 class Remote(unittest.TestCase):
@@ -17,7 +17,7 @@ class Remote(unittest.TestCase):
             binary = str(Path(td) / 'remote-test')
             subprocess.run(['c++', '-std=c++20', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-exceptions',
                             '-fno-rtti', '-pthread', '-Isrc', 'tests/remote_test.cpp', *SOURCES, library,
-                            '-o', binary], cwd=ROOT, check=True)
+                            '-lz', '-o', binary], cwd=ROOT, check=True)
             work = Path(td) / 'title'
             work.mkdir()
             subprocess.run([binary, str(work)], cwd=ROOT, check=True, timeout=120)

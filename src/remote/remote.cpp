@@ -11,6 +11,7 @@
 #include "../title_threads.hpp"
 #include "backends.h"
 #include "files.h"
+#include "stream_check.h"
 
 #include <algorithm>
 #include <atomic>
@@ -25,6 +26,7 @@
 #include <set>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
 namespace ps5::remote
 {
@@ -547,12 +549,14 @@ class FileWriter final : public Writer
     std::FILE *file_ = nullptr;
 };
 
-/* The bytes of a download, to its file in .remote-downloads/ through the writer. */
+/* The bytes of a download, to its file in .remote-downloads/ through the writer. Its contents
+ * are checked as they go by (StreamCheck). */
 class FileReceiver final : public Receiver
 {
   public:
-    FileReceiver(Writer &writer, std::string path, uint64_t base, uint64_t start)
-        : writer_(writer), path_(std::move(path)), base_(base), start_(start)
+    FileReceiver(Writer &writer, std::string path, uint64_t base, uint64_t start,
+                 StreamCheck &check)
+        : writer_(writer), path_(std::move(path)), base_(base), start_(start), check_(check)
     {
     }
 
@@ -562,12 +566,14 @@ class FileReceiver final : public Receiver
         if (from_start && start_ > 0)
         {
             start_ = 0;
+            check_.restart();
             return writer_.open(path_, 0, &error_);
         }
         return true;
     }
     bool take(const void *data, size_t size) override
     {
+        check_.feed(start_ + written_, data, size);
         if (!writer_.write(data, size, &error_))
             return false;
         written_ += size;
@@ -602,6 +608,7 @@ class FileReceiver final : public Receiver
     std::string path_;
     uint64_t base_;  /* the game's bytes before this file */
     uint64_t start_; /* where in the file the transfer began */
+    StreamCheck &check_;
     uint64_t written_ = 0;
     std::string error_;
     Clock::time_point sampled_ = Clock::now(); /* when the speed was last measured */
@@ -614,6 +621,48 @@ enum class Outcome
     stopped,
     failed
 };
+
+/* The queue entry being downloaded shows the step it is in. */
+void show_state(State step)
+{
+    Shared &s = state();
+    std::lock_guard<std::mutex> lock(s.lock);
+    for (Entry &entry : s.queue)
+        if (entry.serial == s.current.load())
+            entry.state = step;
+}
+
+/* A download that goes on from where it was: what its file has before `start`, read from the
+ * drive for the check of its contents (the queue shows it as verifying meanwhile). False when
+ * it was asked to stop; a file that cannot be read is left unchecked (the check sees the gap). */
+bool feed_from_drive(StreamCheck &check, const std::string &path, uint64_t base, uint64_t start)
+{
+    Shared &s = state();
+    std::FILE *file = std::fopen(path.c_str(), "rb");
+    if (file == nullptr)
+        return true;
+    show_state(State::verifying);
+    std::vector<char> buffer(1u << 20);
+    bool stopped = false;
+    for (uint64_t done = 0; done < start;)
+    {
+        if (s.halt.load() || (s.cancel.load() != 0 && s.cancel.load() == s.current.load()))
+        {
+            stopped = true;
+            break;
+        }
+        const size_t want = size_t(std::min<uint64_t>(buffer.size(), start - done));
+        const size_t got = std::fread(buffer.data(), 1, want, file);
+        if (got == 0)
+            break;
+        check.feed(done, buffer.data(), got);
+        done += got;
+        s.current_done.store(base + done);
+    }
+    std::fclose(file);
+    show_state(State::downloading);
+    return !stopped;
+}
 
 std::string size_text(uint64_t bytes)
 {
@@ -653,12 +702,15 @@ Outcome download_part(Source &source, const Paths &paths, const Game &game, cons
         return Outcome::failed;
     }
     /* Going on: written over from `start` (the rewound bytes come again), else a new file. */
+    StreamCheck check(part.crc32);
+    if (start > 0 && !feed_from_drive(check, staged, base, start))
+        return Outcome::stopped;
     const std::unique_ptr<Writer> writer =
         paths.writer ? paths.writer() : std::unique_ptr<Writer>(new FileWriter);
     if (!writer->open(staged, start, error))
         return Outcome::failed;
     state().current_done.store(base + start);
-    FileReceiver receiver(*writer, staged, base, start);
+    FileReceiver receiver(*writer, staged, base, start, check);
     const bool fetched = source.fetch(
         as_source_game(game),
         {part.id, part.name, part.size, FileKind::game, part.crc32, part.md5, part.sha1}, start,
@@ -682,6 +734,20 @@ Outcome download_part(Source &source, const Paths &paths, const Game &game, cons
                  size_text(static_cast<uint64_t>(std::max<int64_t>(have, 0))) + " of " +
                  size_text(part.size) + ")";
         return Outcome::failed;
+    }
+    /* A damaged file is deleted, so that trying again downloads it again. */
+    switch (check.result())
+    {
+    case Verified::damaged:
+        (void)std::remove(staged.c_str());
+        *error =
+            "The downloaded file " + part.name + " is damaged; trying again downloads it again";
+        return Outcome::failed;
+    case Verified::intact:
+        log("download of " + game.name + ": " + part.name + " checked");
+        break;
+    default:
+        log("download of " + game.name + ": " + part.name + " could not be checked");
     }
     return Outcome::done;
 }

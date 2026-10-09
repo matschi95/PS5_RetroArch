@@ -9,6 +9,7 @@
 #include "../src/remote/files.h"
 #include "../src/remote/library.h"
 #include "../src/remote/remote.h"
+#include "../src/remote/stream_check.h"
 
 #include <atomic>
 #include <cassert>
@@ -20,6 +21,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <thread>
+#include <zlib.h>
 #include <vector>
 
 namespace remote = ps5::remote;
@@ -183,6 +185,15 @@ remote::SourceGame game(const std::string &id, const std::string &name, const st
     return g;
 }
 
+/* A file's CRC32 as a source says it. */
+std::string crc_of(const std::string &bytes)
+{
+    char out[16];
+    std::snprintf(out, sizeof out, "%08lx",
+                  ::crc32(0, reinterpret_cast<const Bytef *>(bytes.data()), uInt(bytes.size())));
+    return out;
+}
+
 /* Waits until a condition holds, at most a few seconds. */
 template <typename Condition> void until(Condition condition)
 {
@@ -260,6 +271,37 @@ static void identity()
     assert(normal_name("ドラゴンクエスト V") == "ドラゴンクエストv");
     assert(normal_name("Mario™ ® 64") == "mario64");
     assert(remote::plain_text("Pokémon Café ドラ") == "Pokemon Cafe ??");
+    /* A file's contents checked as they come: in pieces, overlapping, from the start again;
+     * a gap or no CRC leaves it unchecked; a spoilt byte is found. */
+    {
+        const std::string bytes = data(100000, 9), crc = crc_of(bytes);
+        remote::StreamCheck pieces(crc);
+        for (size_t at = 0; at < bytes.size(); at += 7000)
+            pieces.feed(at, bytes.data() + at, std::min<size_t>(7000, bytes.size() - at));
+        assert(pieces.result() == remote::Verified::intact && pieces.next() == bytes.size());
+        remote::StreamCheck overlapping("0x" + crc);
+        overlapping.feed(0, bytes.data(), 60000);
+        overlapping.feed(40000, bytes.data() + 40000, bytes.size() - 40000);
+        assert(overlapping.result() == remote::Verified::intact);
+        remote::StreamCheck restarted(crc);
+        restarted.feed(0, "junk", 4);
+        restarted.restart();
+        restarted.feed(0, bytes.data(), bytes.size());
+        assert(restarted.result() == remote::Verified::intact);
+        remote::StreamCheck gap(crc);
+        gap.feed(0, bytes.data(), 1000);
+        gap.feed(2000, bytes.data() + 2000, bytes.size() - 2000);
+        assert(gap.result() == remote::Verified::unknown);
+        remote::StreamCheck none("");
+        none.feed(0, bytes.data(), bytes.size());
+        assert(none.result() == remote::Verified::unknown);
+        std::string spoilt = bytes;
+        spoilt[5] = char(spoilt[5] ^ 0x40);
+        remote::StreamCheck damaged(crc);
+        damaged.feed(0, spoilt.data(), spoilt.size());
+        assert(damaged.result() == remote::Verified::damaged);
+    }
+
     assert(remote::normal_crc("B19ED489|crc") == "b19ed489" &&
            remote::normal_crc("0xB19ED489") == "b19ed489");
     assert(remote::normal_crc("DETECT").empty() && remote::normal_crc("00000000|crc").empty());
@@ -360,7 +402,7 @@ int main(int argc, char **argv)
     office.games = {
         game("70", "Super Mario World", "snes", "SMW", {{"SMW.sfc", "700"}}, office),
         game("71", "Chrono Trigger", "snes", "Chrono Trigger (USA)",
-             {{"Chrono Trigger (USA).sfc", "710"}}, office),
+             {{"Chrono Trigger (USA).sfc", "710"}}, office, crc_of(chrono)),
     };
     office.games[0].ids["igdb"] = "1070";
     office.games[1].cover = "/ct.jpg";
@@ -519,6 +561,28 @@ int main(int argc, char **argv)
     assert(read(chrono_folder + "/Chrono Trigger (USA).sfc") == chrono);
     assert(files::names(paths.content + "/SNES/Chrono Trigger (USA)").size() == 1);
     files::remove_tree(chrono_folder);
+
+    /* Checked against the source's CRC32 as it comes, what the file had read from the drive
+     * first: spoilt before where it goes on, it is deleted and fails; tried again, it comes
+     * whole. */
+    std::string damaged = chrono.substr(0, 7u << 20);
+    damaged[1000] = char(damaged[1000] ^ 1);
+    write(staged, damaged);
+    assert(remote::enqueue("office", "71", false));
+    until(
+        []
+        {
+            const auto list = remote::downloads();
+            return !list.empty() && list[0].state == remote::State::failed;
+        });
+    assert(remote::downloads()[0].error == "The downloaded file Chrono Trigger (USA).sfc is "
+                                           "damaged; trying again downloads it again");
+    assert(files::size(staged) < 0);
+    assert(remote::enqueue("office", "71", false));
+    until([] { return remote::downloads().empty(); });
+    chrono_folder = remote::placed_folder("office", "71");
+    assert(read(chrono_folder + "/Chrono Trigger (USA).sfc") == chrono);
+    files::remove_tree(chrono_folder);
     files::remove_tree(paths.config + "/placed");
 
     /* A failed download stays, with why; a cancelled one is removed. */
@@ -632,7 +696,7 @@ int main(int argc, char **argv)
     assert(files::size(paths.playlists + "/Remote.lpl") < 0);
 
     std::puts(
-        "remote: identity, lists, titles, playlists and stubs, covers, downloads with "
+        "remote: identity, lists, titles, playlists and stubs, covers, downloads checked as they come with "
         "resume, a server that cannot go on, failure, cancel, stop, leftovers, deleting PASS");
     return 0;
 }
