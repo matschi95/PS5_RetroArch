@@ -13,8 +13,9 @@
  *     for, "<database> (Remote).lpl", each title in it once, labelled with the marker
  *     (sources.json's "marker", " [Remote]" when it names none). Its entries are stubs,
  *     <system folder>/.remote/<game>.remote, run by the remote core (cores/remote/,
- *     PS5_LIBRARY_FETCH_CORE), which downloads the game, then started from its system's
- *     playlist as any other. A title
+ *     PS5_LIBRARY_FETCH_CORE), which downloads the game and starts it with its system's
+ *     core. Their covers are in the media library's folder for that folder (where
+ *     EmulationStation looks), and the source's details of each are its metadata. A title
  *     a game on the console is (remote.h, same_as_local) is left out. The system folder,
  *     where the platform's games go, is the folder in content/ named after the platform
  *     ("SNES", "PS1"), else content/<platform>;

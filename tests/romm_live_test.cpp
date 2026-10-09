@@ -300,8 +300,7 @@ int main(int argc, char **argv)
         check(remote::enqueue("home", alpha_id, false) &&
                   until([] { return remote::downloads().empty(); }, 60),
               "a download");
-        const std::string alpha_folder = remote::placed_folder("home", alpha_id);
-        check(read(alpha_folder + "/Alpha Quest (USA).sfc") == alpha, "...whole");
+        check(read(remote::placed_launch("home", alpha_id)) == alpha, "...whole");
         const std::string big = read(library + "/roms/snes/Delta Big (USA).sfc");
         remote::enqueue("home", big_id, false);
         until(
@@ -316,7 +315,7 @@ int main(int argc, char **argv)
               "a download stopped part way");
         remote::start(paths, {});
         check(until([] { return remote::downloads().empty(); }, 120) &&
-                  read(remote::placed_folder("home", big_id) + "/Delta Big (USA).sfc") == big,
+                  read(remote::placed_launch("home", big_id)) == big,
               "...gone on with and whole");
         remote::stop();
     }

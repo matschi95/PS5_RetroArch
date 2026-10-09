@@ -17,8 +17,6 @@ namespace
 {
 /* How long a message stands. */
 constexpr double message_seconds = 4.0;
-/* How long "Downloaded" stands before the download screen ends. */
-constexpr double done_seconds = 2.0;
 /* The panel every screen draws on. */
 constexpr int panel_x = 80, panel_y = 40, panel_width = frame_width - 160,
               panel_height = frame_height - 80;
@@ -161,12 +159,12 @@ class DownloadScreen final : public Screen
             message_.say(services, "The sources no longer have this game.", true);
             return;
         }
-        /* Downloaded already (a frontend that has not read its list again since): said so. */
+        /* Downloaded already (a frontend that has not read its list again since): it starts. */
         for (const Game &game : title_.games)
-            if (const std::string folder = services.placed(game.source, game.id); !folder.empty())
+            if (const std::string launch = services.placed(game.source, game.id); !launch.empty())
             {
                 chosen_ = game;
-                folder_ = folder;
+                launch_ = launch;
                 return;
             }
         /* Already coming: from the source it comes from, now first; one whose download failed
@@ -202,7 +200,7 @@ class DownloadScreen final : public Screen
         }
         if (pressed & circle)
             finished_ = true; /* the download goes on in the background */
-        if (!chosen_.id.empty() && (pressed & square) && folder_.empty())
+        if (!chosen_.id.empty() && (pressed & square) && launch_.empty())
         {
             const bool cancelled = services_.cancel(chosen_.source, chosen_.id);
             message_.say(services_,
@@ -212,10 +210,13 @@ class DownloadScreen final : public Screen
         }
         if (!chosen_.id.empty() && (pressed & cross) && failed_)
             choose(chosen_); /* tried again */
-        /* Downloaded: the screen ends once that was seen, and the game is in its system's list
-         * as the core closes (the title's ps5_remote_core_closed), to be started from there. */
-        if (done_at_ >= 0 && services_.now() - done_at_ >= done_seconds)
-            finished_ = true;
+        /* Once "Starting the game..." was drawn: it starts in this RetroArch, with its
+         * platform's core, and the remote core goes (its system's list has it then). */
+        if (ready_ && !started_)
+        {
+            started_ = true;
+            services_.play(launch_, stub_.core);
+        }
     }
 
     void draw(Canvas &c) override
@@ -232,15 +233,14 @@ class DownloadScreen final : public Screen
         failed_ = false;
         if (chosen_.id.empty())
             state = "";
-        else if (folder_.empty())
-            folder_ = services_.placed(chosen_.source, chosen_.id);
-        if (!folder_.empty())
+        else if (launch_.empty())
+            launch_ = services_.placed(chosen_.source, chosen_.id);
+        if (!launch_.empty())
         {
             share = 1;
-            state = "Downloaded";
-            detail_ = "It is in its system's list now, to be started from there.";
-            if (done_at_ < 0)
-                done_at_ = services_.now();
+            state = "Starting the game...";
+            detail_.clear();
+            ready_ = true;
         }
         else if (!chosen_.id.empty())
         {
@@ -285,7 +285,7 @@ class DownloadScreen final : public Screen
         message_.draw(c, services_);
         if (failed_)
             hints(c, "Cross: try again    Square: cancel    Circle: back");
-        else if (folder_.empty() && !chosen_.id.empty())
+        else if (launch_.empty() && !chosen_.id.empty())
             hints(c, "Circle: keep downloading in the background    Square: cancel");
         else
             hints(c, "Circle: back");
@@ -322,8 +322,8 @@ class DownloadScreen final : public Screen
         c.bar(inner_x, panel_y + 190, inner_width, 18, share);
         if (!detail.empty())
             c.block(inner_x, panel_y + 226, detail, color::meta, inner_width);
-        if (!chosen_.id.empty() && folder_.empty() && !failed_)
-            c.text(inner_x, panel_y + 320, "It is in its system's list when the download is done.",
+        if (!chosen_.id.empty() && launch_.empty() && !failed_)
+            c.text(inner_x, panel_y + 320, "The game starts when the download is done.",
                    color::meta);
     }
 
@@ -332,9 +332,8 @@ class DownloadScreen final : public Screen
     Title title_;
     std::unique_ptr<SourceDialog> sources_;
     Game chosen_;
-    std::string folder_, detail_;
-    double done_at_ = -1; /* when it was seen downloaded */
-    bool failed_ = false, finished_ = false;
+    std::string launch_, detail_; /* launch_: its file on the console, once it is there */
+    bool ready_ = false, started_ = false, failed_ = false, finished_ = false;
     Message message_;
 };
 
@@ -386,9 +385,9 @@ class DownloadsScreen final : public Screen
                              cancelled ? "Download cancelled." : "Could not cancel the download.",
                              !cancelled);
             }
-            else if (row.kind == Row::placed_row && armed_ != row.folder)
+            else if (row.kind == Row::placed_row && armed_ != row.launch)
             {
-                armed_ = row.folder;
+                armed_ = row.launch;
                 message_.say(services_, "Square again deletes " + row.game.name +
                                             " from the console. Its saves stay.");
             }
@@ -396,7 +395,7 @@ class DownloadsScreen final : public Screen
             {
                 std::string error;
                 armed_.clear();
-                if (services_.remove(row.game, row.folder, &error))
+                if (services_.remove(row.game, row.launch, &error))
                     message_.say(services_, "Deleted. It is listed on its sources again once "
                                             "you leave Downloads.");
                 else
@@ -513,7 +512,7 @@ class DownloadsScreen final : public Screen
         bool warning = false;
         Download download;
         Game game;
-        std::string folder;
+        std::string launch; /* placed_row: its file on the console */
     };
 
     std::vector<Row> rows()
@@ -546,9 +545,9 @@ class DownloadsScreen final : public Screen
             placed_.clear();
             for (const Title &title : titles_)
                 for (const Game &game : title.games)
-                    if (const std::string folder = services_.placed(game.source, game.id);
-                        !folder.empty())
-                        placed_.emplace_back(game, folder);
+                    if (const std::string launch = services_.placed(game.source, game.id);
+                        !launch.empty())
+                        placed_.emplace_back(game, launch);
         }
         const std::vector<Title> &titles = titles_;
         const auto name_of = [&](const std::string &source, const std::string &id)
@@ -610,7 +609,7 @@ class DownloadsScreen final : public Screen
     std::string armed_; /* the game a first Square asked to delete */
     uint64_t generation_ = ~uint64_t(0);
     std::vector<Title> titles_;
-    std::vector<std::pair<Game, std::string>> placed_; /* the games on the console, their folders */
+    std::vector<std::pair<Game, std::string>> placed_; /* the games on the console, their files */
     Message message_;
 };
 

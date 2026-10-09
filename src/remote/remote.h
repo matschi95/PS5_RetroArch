@@ -103,12 +103,13 @@ struct Game
     std::string id;     /* the source's name for it */
     std::string name;
     std::string platform;     /* src/ps5_library.c's ("snes") */
-    std::string folder;       /* its folder's name in the system folder, once downloaded */
-    std::string file;         /* the file that is run (one of parts), inside the folder */
+    std::string folder;       /* its folder's name in the system folder (a game of several files) */
+    std::string file;         /* the file that is run (one of parts) */
     uint64_t size = 0;        /* all of its files */
     std::string cover;        /* its cover on the console; empty without one */
     std::string cover_source; /* the source's name for the cover */
     std::vector<Part> parts;
+    std::map<std::string, std::string> details; /* what the source says of it (source.h) */
     /* What tells it apart (source.h): the checksum of the file that is run (8 lower-case hex
      * digits; empty when unknown), its ids at metadata providers, and whether its name comes
      * from such metadata. */
@@ -121,7 +122,7 @@ struct Game
 struct Placed
 {
     Game game;
-    std::string folder; /* the game's folder on the console */
+    std::string place;  /* the game on the console: its file, or its folder (several files) */
     std::string launch; /* the file that is run */
 };
 
@@ -243,8 +244,11 @@ bool cancel(const std::string &source, const std::string &id);
  * fetches it from. A source's firmware is listed with its games, and a downloaded game's
  * platform gets what its cores lack at once. */
 std::vector<FirmwareOffer> firmware_offers();
-/* The game's folder on the console, when it is there ("" else). */
-std::string placed_folder(const std::string &source, const std::string &id);
+/* Where a downloaded game is on the console: its file, or its folder when it has several files
+ * ("" when it is not there). */
+std::string placed_path(const std::string &source, const std::string &id);
+/* The file of a downloaded game that is run ("" when it is not there). */
+std::string placed_launch(const std::string &source, const std::string &id);
 /* A game downloaded from a source was deleted from the console: it is the source's again. */
 void forget(const std::string &source, const std::string &id);
 } // namespace ps5::remote

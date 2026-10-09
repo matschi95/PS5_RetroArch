@@ -9,9 +9,9 @@
  *
  *   - a game on the sources: the download dialog. With several sources having the game,
  *     the source dialog asks which one first. Cross on the game downloads it (first in the
- *     queue); once it is all there the screen says so and ends, and the game is in its
- *     system's list, started from there as any other. Circle keeps downloading in the
- *     background, Square cancels;
+ *     queue) and starts it once it is all there, in this RetroArch, with its platform's
+ *     core (the remote core goes; the game is in its system's list then). Circle keeps
+ *     downloading in the background, Square cancels;
  *   - Downloads: the sources (Cross reads their lists again), the download queue (Cross
  *     tries a failed one again, Square cancels) and the games downloaded from them (Square
  *     twice deletes one from the console; its saves stay). Circle goes back.

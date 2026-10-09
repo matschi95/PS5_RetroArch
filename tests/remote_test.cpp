@@ -512,6 +512,7 @@ int main(int argc, char **argv)
     };
     office.games[0].ids["igdb"] = "1070";
     office.games[1].cover = "/ct.jpg";
+    office.games[1].details = {{"description", "Time \"travel\"\nagain"}, {"genre", "RPG"}};
     /* Firmware: the PlayStation BIOS at home (and the Saturn's of the same name, verified,
      * which is not the PlayStation core's), a damaged optional one at the office. */
     const std::string bios = data(512 << 10, 4), saturn_bios = data(1000, 5);
@@ -612,22 +613,23 @@ int main(int argc, char **argv)
            chrono_game.cover.substr(chrono_game.cover.size() - 4) == ".jpg" &&
            read(chrono_game.cover) == "\xff\xd8 chrono");
 
-    /* A download: from the source asked for, into the system's folder, the playlist's at the
-     * next start. */
+    /* A download: from the source asked for, into the system's folder (a game of one file as
+     * that file), the playlist's at the next start. */
     assert(remote::enqueue("home", "1", true));
     assert(!remote::enqueue("office", "70", false)); /* the same game is coming already */
     until([] { return remote::downloads().empty(); });
-    const std::string smw_folder = remote::placed_folder("home", "1");
-    assert(smw_folder == paths.content + "/SNES/Super Mario World (USA)");
-    assert(read(smw_folder + "/Super Mario World (USA).sfc") == smw);
+    const std::string smw_file = remote::placed_path("home", "1");
+    assert(smw_file == paths.content + "/SNES/Super Mario World (USA).sfc");
+    assert(read(smw_file) == smw && remote::placed_launch("home", "1") == smw_file);
     assert(!files::is_folder(paths.downloads));
-    assert(placed.size() == 1 && placed[0].launch == smw_folder + "/Super Mario World (USA).sfc");
+    assert(placed.size() == 1 && placed[0].launch == smw_file && placed[0].place == smw_file);
 
     /* A game in a folder: its files as on the source, the .cue run; the system has no folder
      * of its own yet. */
     assert(remote::enqueue("home", "3", false));
     until([] { return remote::downloads().empty(); });
-    assert(remote::placed_folder("home", "3") == paths.content + "/psx/Final Fantasy VII");
+    assert(remote::placed_path("home", "3") == paths.content + "/psx/Final Fantasy VII" &&
+           remote::placed_launch("home", "3") == paths.content + "/psx/Final Fantasy VII/FF7.cue");
     assert(read(paths.content + "/psx/Final Fantasy VII/FF7.bin") == ff7_bin);
     remote::Game ff7_game;
     assert(remote::find("home", "3", &ff7_game) && ff7_game.parts[1].unpacked);
@@ -650,8 +652,11 @@ int main(int argc, char **argv)
            playlist["items"].items[0]["path"].str() ==
                paths.content + "/psx/Final Fantasy VII/FF7.cue");
     assert(files::size(psx_remote) < 0);
-    /* The remaining title's cover, under its stub's name. */
-    assert(read(paths.media + "/snes/covers/Chrono Trigger.jpg") == "\xff\xd8 chrono");
+    /* The remaining title's cover, under its stub's name in the stubs' folder (where
+     * EmulationStation looks), and its details. */
+    assert(read(paths.media + "/snes/covers/.remote/Chrono Trigger.jpg") == "\xff\xd8 chrono");
+    assert(read(paths.media + "/snes/metadata/Chrono Trigger.meta") ==
+           "description = \"Time \\\"travel\\\"\\nagain\"\ngenre = \"RPG\"\n");
 
     /* An interrupted download goes on where it was, the last 4 MiB fetched again. */
     const std::string staged = paths.downloads + "/office/71/Chrono Trigger (USA).sfc";
@@ -662,23 +667,24 @@ int main(int argc, char **argv)
     assert(remote::enqueue("office", "71", false));
     until([] { return remote::downloads().empty(); });
     assert(office.offsets.back() == (3u << 20));
-    std::string chrono_folder = remote::placed_folder("office", "71");
-    assert(read(chrono_folder + "/Chrono Trigger (USA).sfc") == chrono);
-    files::remove_tree(chrono_folder);
+    std::string chrono_file = remote::placed_path("office", "71");
+    assert(read(chrono_file) == chrono);
+    files::remove_tree(chrono_file);
 
-    /* ...also from a server that cannot go on: from the start. A folder of the game's name
+    /* ...also from a server that cannot go on: from the start. A file of the game's name
      * that is there is the player's: left alone. */
-    write(paths.content + "/SNES/Chrono Trigger (USA)/mine.txt", "mine");
+    write(paths.content + "/SNES/Chrono Trigger (USA).sfc", "mine");
     write(staged, spoilt);
     office.ignores_range = true;
     assert(remote::enqueue("office", "71", false));
     until([] { return remote::downloads().empty(); });
     office.ignores_range = false;
-    chrono_folder = remote::placed_folder("office", "71");
-    assert(chrono_folder == paths.content + "/SNES/Chrono Trigger (USA) (2)");
-    assert(read(chrono_folder + "/Chrono Trigger (USA).sfc") == chrono);
-    assert(files::names(paths.content + "/SNES/Chrono Trigger (USA)").size() == 1);
-    files::remove_tree(chrono_folder);
+    chrono_file = remote::placed_path("office", "71");
+    assert(chrono_file == paths.content + "/SNES/Chrono Trigger (USA) (2).sfc");
+    assert(read(chrono_file) == chrono);
+    assert(read(paths.content + "/SNES/Chrono Trigger (USA).sfc") == "mine");
+    files::remove_tree(chrono_file);
+    files::remove_tree(paths.content + "/SNES/Chrono Trigger (USA).sfc");
 
     /* Checked against the source's CRC32 as it comes, what the file had read from the drive
      * first: spoilt before where it goes on, it is deleted and fails; tried again, it comes
@@ -698,9 +704,9 @@ int main(int argc, char **argv)
     assert(files::size(staged) < 0);
     assert(remote::enqueue("office", "71", false));
     until([] { return remote::downloads().empty(); });
-    chrono_folder = remote::placed_folder("office", "71");
-    assert(read(chrono_folder + "/Chrono Trigger (USA).sfc") == chrono);
-    files::remove_tree(chrono_folder);
+    chrono_file = remote::placed_path("office", "71");
+    assert(read(chrono_file) == chrono);
+    files::remove_tree(chrono_file);
     files::remove_tree(paths.config + "/placed");
 
     /* A failed download stays, with why; a cancelled one is removed. */
@@ -726,7 +732,7 @@ int main(int argc, char **argv)
     assert(remote::cancel("office", "71"));
     office.hold = false;
     until([] { return remote::downloads().empty() && !files::is_folder(paths.downloads); });
-    assert(remote::placed_folder("office", "71").empty());
+    assert(remote::placed_path("office", "71").empty());
 
     /* Written by the console's FTP server: none answering fails it, saying so; a full drive
      * fails it with what the server said, what was written kept to go on from. */
@@ -771,7 +777,7 @@ int main(int argc, char **argv)
     assert(read_json(paths.config + "/queue.json").items.size() == 1);
     remote::start(paths, [](const remote::Placed &p) { remote::note_placed(paths, p); });
     until([] { return remote::downloads().empty(); });
-    assert(read(remote::placed_folder("office", "71") + "/Chrono Trigger (USA).sfc") == chrono);
+    assert(read(remote::placed_path("office", "71")) == chrono);
 
     /* Leftovers of a game no longer queued go when the menu is up again. */
     write(paths.downloads + "/home/99/x.bin", "left");
@@ -781,20 +787,23 @@ int main(int argc, char **argv)
     /* Deleted from the console: out of its playlist at the next start, on its sources again. */
     remote::sync(paths);
     assert(read_json(snes_playlist)["items"].items.size() == 3);
-    const std::string deleted = remote::placed_folder("office", "71");
+    /* Its details came with it, under its file's name. */
+    assert(read(paths.media + "/snes/metadata/Chrono Trigger (USA).meta").find("genre = \"RPG\"") !=
+           std::string::npos);
+    const std::string deleted = remote::placed_path("office", "71");
     files::remove_tree(deleted);
     remote::forget("office", "71");
-    assert(remote::placed_folder("office", "71").empty());
-    remote::note_removed(paths, "snes", deleted + "/Chrono Trigger (USA).sfc");
+    assert(remote::placed_path("office", "71").empty());
+    remote::note_removed(paths, "snes", deleted);
     remote::sync(paths);
     assert(read_json(snes_playlist)["items"].items.size() == 2);
     assert(read_json(snes_remote)["items"].items.size() == 1);
 
     /* A cover of the player's under a title's name: neither written over nor taken back. */
-    const std::string chrono_cover = paths.media + "/snes/covers/Chrono Trigger.jpg";
+    const std::string chrono_cover = paths.media + "/snes/covers/.remote/Chrono Trigger.jpg";
     assert(read(chrono_cover) == "\xff\xd8 chrono");
     std::remove(chrono_cover.c_str());
-    const std::string mine_cover = paths.media + "/snes/covers/Chrono Trigger.png";
+    const std::string mine_cover = paths.media + "/snes/covers/.remote/Chrono Trigger.png";
     write(mine_cover, "mine");
     remote::sync(paths);
     assert(read(mine_cover) == "mine" && files::size(chrono_cover) < 0);

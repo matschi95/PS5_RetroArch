@@ -39,8 +39,8 @@ constexpr auto refresh_age = std::chrono::minutes(15);
 /* A download that goes on fetches its last bytes again: after a power cut, the end of a
  * file may not hold what was written there. */
 constexpr uint64_t rewind_bytes = 4u << 20;
-/* A kept list of another format is listed anew (2: Part::unpacked). */
-constexpr uint64_t catalog_format = 2;
+/* A kept list of another format is listed anew (2: Part::unpacked, 3: Game::details). */
+constexpr uint64_t catalog_format = 3;
 
 struct Entry
 {
@@ -198,6 +198,7 @@ bool make_game(const std::string &source, const SourceGame &from, Game *game)
         if (!id.first.empty() && !id.second.empty())
             game->ids[lower(id.first)] = id.second;
     game->identified = from.identified;
+    game->details = from.details;
     std::vector<std::string> names;
     std::vector<uint64_t> sizes;
     for (const SourceFile &file : from.files)
@@ -314,6 +315,9 @@ Json catalog_games(const std::vector<Game> &list)
         for (const auto &id : game.ids)
             ids.set(id.first, Json::of(id.second));
         item.set("identified", Json::of(game.identified));
+        Json &details = item.set("details", Json::record());
+        for (const auto &detail : game.details)
+            details.set(detail.first, Json::of(detail.second));
         games.push(std::move(item));
     }
     return games;
@@ -367,6 +371,9 @@ void load_catalog(Shared &s, SourceState &state)
             if (!text(item["ids"], key.c_str()).empty())
                 game.ids[key] = text(item["ids"], key.c_str());
         game.identified = item["identified"].yes();
+        for (const auto &key : item["details"].order)
+            if (!text(item["details"], key.c_str()).empty())
+                game.details[key] = text(item["details"], key.c_str());
         game.normal_name = normal_name(game.name);
         const bool usable = !game.id.empty() && !game.platform.empty() && !game.parts.empty() &&
                             !game.folder.empty() &&
@@ -416,8 +423,8 @@ void load_queue(Shared &s)
     }
 }
 
-/* Where each source's downloaded games are: config/remote/<source>/placed.json, the game's
- * folder by its id (a folder of the same name that was there already makes it another). */
+/* Where each source's downloaded games are: config/remote/<source>/placed.json, the game by its
+ * id: its file, or its folder when it has several (place_game). */
 Json &placed_of(Shared &s, const std::string &source)
 {
     auto found = s.placed_games.find(source);
@@ -438,11 +445,13 @@ void write_placed(Shared &s, const std::string &source)
         log("could not write placed.json of " + source);
 }
 
-/* The folder a game of a source is in on the console; "" when it is not there. */
-std::string folder_of(Shared &s, const std::string &source, const std::string &id)
+/* Where a game of a source is on the console (its file or its folder); "" when it is not
+ * there. */
+std::string place_of(Shared &s, const std::string &source, const std::string &id)
 {
-    const std::string folder = text(placed_of(s, source), id.c_str());
-    return !folder.empty() && files::is_folder(folder) ? folder : std::string();
+    const std::string place = text(placed_of(s, source), id.c_str());
+    return !place.empty() && (files::is_folder(place) || files::size(place) >= 0) ? place
+                                                                                  : std::string();
 }
 
 /* ---- sources.json ---- */
@@ -776,8 +785,22 @@ Outcome download_part(Source &source, const Paths &paths, const Game &game, cons
     return Outcome::done;
 }
 
-/* A game whose files are all downloaded: into its place at once, its folder as the source
- * names it, another name when a folder of that name is there already (the player's own). */
+/* A free name in a folder: `name`, else "<stem> (2)<extension>" and so on (the player's own
+ * file or folder of that name is left alone). */
+std::string free_path(const std::string &folder, const std::string &name, bool keep_extension)
+{
+    const size_t dot = keep_extension ? name.find_last_of('.') : std::string::npos;
+    const std::string stem = dot == std::string::npos || dot == 0 ? name : name.substr(0, dot);
+    const std::string extension = stem.size() == name.size() ? "" : name.substr(stem.size());
+    std::string path = folder + "/" + name;
+    for (int n = 2; files::is_folder(path) || files::size(path) >= 0; n++)
+        path = folder + "/" + stem + " (" + std::to_string(n) + ")" + extension;
+    return path;
+}
+
+/* A game whose files are all downloaded: into its place at once, as the source keeps it. A
+ * game of one file goes into its system's folder as it is; one of several (a disc's .cue and
+ * .bin, an .m3u) into a folder of its own, named as the source names it. */
 bool place_game(Shared &s, const Game &game, Placed *placed, std::string *error)
 {
     const Paths &paths = s.paths;
@@ -788,22 +811,25 @@ bool place_game(Shared &s, const Game &game, Placed *placed, std::string *error)
         *error = "Cannot write to " + system;
         return false;
     }
-    std::string folder = system + "/" + game.folder;
-    for (int n = 2; files::is_folder(folder) || files::size(folder) >= 0; n++)
-        folder = system + "/" + game.folder + " (" + std::to_string(n) + ")";
     const std::string staged = staged_folder(paths, game.source, game.id);
-    if (std::rename(staged.c_str(), folder.c_str()) != 0)
+    const bool one_file =
+        game.parts.size() == 1 && game.parts.front().name.find('/') == std::string::npos;
+    const std::string place = one_file ? free_path(system, game.parts.front().name, true)
+                                       : free_path(system, game.folder, false);
+    const std::string from = one_file ? staged_path(paths, game, game.parts.front()) : staged;
+    if (std::rename(from.c_str(), place.c_str()) != 0)
     {
         *error = "Cannot move the download into " + system;
         return false;
     }
+    (void)rmdir(staged.c_str());
     (void)rmdir((paths.downloads + "/" + safe(game.source)).c_str());
     (void)rmdir(paths.downloads.c_str());
-    placed_of(s, game.source).set(game.id, Json::of(folder));
+    placed_of(s, game.source).set(game.id, Json::of(place));
     write_placed(s, game.source);
     placed->game = game;
-    placed->folder = folder;
-    placed->launch = folder + "/" + game.file;
+    placed->place = place;
+    placed->launch = one_file ? place : place + "/" + game.file;
     return true;
 }
 
@@ -1625,11 +1651,22 @@ std::vector<FirmwareOffer> firmware_offers()
     return offers_locked(s);
 }
 
-std::string placed_folder(const std::string &source, const std::string &id)
+std::string placed_path(const std::string &source, const std::string &id)
 {
     Shared &s = state();
     std::lock_guard<std::mutex> lock(s.lock);
-    return folder_of(s, source, id);
+    return place_of(s, source, id);
+}
+
+std::string placed_launch(const std::string &source, const std::string &id)
+{
+    Shared &s = state();
+    std::lock_guard<std::mutex> lock(s.lock);
+    const std::string place = place_of(s, source, id);
+    if (place.empty() || !files::is_folder(place))
+        return place;
+    const Game *game = find_game(s, source, id);
+    return game ? place + "/" + game->file : std::string();
 }
 
 void forget(const std::string &source, const std::string &id)

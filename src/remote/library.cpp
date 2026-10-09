@@ -148,7 +148,8 @@ std::string media_cover(const Paths &paths, const std::string &platform, const s
     if (cover.empty() || ps5_library_media_key(game.c_str(), key, sizeof key) != 0)
         return "";
     const size_t dot = cover.find_last_of('.');
-    return paths.media + "/" + platform + "/covers/" + key + cover.substr(dot);
+    return paths.media + "/" + platform + "/covers/" + ps5_library_media_subfolder(game.c_str()) +
+           key + cover.substr(dot);
 }
 
 /* A cover the media library has for that game (any picture type), or "". */
@@ -160,6 +161,33 @@ std::string media_cover_there(const Paths &paths, const std::string &platform,
             !path.empty() && files::size(path) > 0)
             return path;
     return "";
+}
+
+/* A game's details in the media library: library/<platform>/metadata/<key>.meta, as the
+ * scraper keeps them (src/scraper.h) and EmulationStation's lists take them; "" when the
+ * game's path has no key. */
+std::string media_meta(const Paths &paths, const std::string &platform, const std::string &game)
+{
+    char key[512];
+    if (ps5_library_media_key(game.c_str(), key, sizeof key) != 0)
+        return "";
+    return paths.media + "/" + platform + "/metadata/" + key + ".meta";
+}
+
+/* Details as a .meta file has them: key = "value" lines. */
+std::string meta_text(const std::map<std::string, std::string> &details)
+{
+    std::string out;
+    for (const auto &detail : details)
+    {
+        out += detail.first + " = \"";
+        for (char c : detail.second)
+            out += c == '\n'               ? std::string("\\n")
+                   : c == '"' || c == '\\' ? std::string("\\") + c
+                                           : std::string(1, c);
+        out += "\"\n";
+    }
+    return out;
 }
 
 /* Copies a file unless the copy is there with its size. */
@@ -296,6 +324,9 @@ void note_placed(const Paths &paths, const Placed &placed)
     note.set("label", Json::of(placed.game.name));
     note.set("crc32", Json::of(placed.game.crc32));
     note.set("cover", Json::of(placed.game.cover));
+    Json &details = note.set("details", Json::record());
+    for (const auto &detail : placed.game.details)
+        details.set(detail.first, Json::of(detail.second));
     leave_note(paths, "placed", placed.game.source + "-" + placed.game.id, note);
 }
 
@@ -348,6 +379,14 @@ void sync(const Paths &paths)
                 if (added && media_cover_there(paths, platform, path).empty())
                     copy_file(text(note, "cover"),
                               media_cover(paths, platform, path, text(note, "cover")));
+                /* Its details, where the media library has none yet: the player's then. */
+                std::map<std::string, std::string> details;
+                for (const auto &key : note["details"].order)
+                    details[key] = text(note["details"], key.c_str());
+                if (const std::string meta = media_meta(paths, platform, path);
+                    added && !details.empty() && !meta.empty() && files::size(meta) < 0 &&
+                    files::make_folders(files::parent(meta)))
+                    files::write(meta, meta_text(details));
                 return added;
             });
         take_notes(paths, "removed",
@@ -455,6 +494,13 @@ void sync(const Paths &paths)
                 !media.empty() && (there.empty() || (there == media && ours.count(media))) &&
                 copy_file(cover, media))
                 written.insert(media);
+            /* Its details too, where none of the player's (scraped, edited) are. */
+            if (const std::string meta = media_meta(paths, platform.first, path);
+                !game.details.empty() && !meta.empty() &&
+                (files::size(meta) < 0 || ours.count(meta)) &&
+                files::make_folders(files::parent(meta)) &&
+                write_changed(meta, meta_text(game.details)))
+                written.insert(meta);
             entries.push_back(playlist_entry(path, game.name + marker, fetch_core, "Remote",
                                              game.crc32, platform.first));
         }

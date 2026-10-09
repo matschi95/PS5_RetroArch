@@ -241,21 +241,26 @@ files and the save sync alike; an older one is refused, and **Downloads** shows 
 - **Listed:** RetroArch has a playlist per system, such as *Sony - PlayStation
   (Remote)*; EmulationStation lists the games in the system itself. Their names end
   in **[Remote]** (`"marker"` in `sources.json` changes it), and the server's cover
-  is their box art. A game on several servers is listed once, and one already on the
-  console (the same checksum, file name or name) is not offered.
-- **Download:** choosing a game downloads it, after asking which server when several
-  have it. Once it is all there you are back where you chose it, and the game is in
-  its system's own list, without **[Remote]**: start it from there like any other.
-  **Circle** keeps it downloading in the background, **Square** cancels.
+  is their box art, its description, genre, developer and release date their details
+  (where you have none of your own). EmulationStation shows them in a folder
+  `.remote` of each system. A game on several servers is listed once, and one already
+  on the console (the same checksum, file name or name) is not offered.
+- **Play:** choosing a game downloads it, after asking which server when several
+  have it, and starts it with its system's core once it is all there; afterwards you
+  are back where you chose it, and the game is in its system's own list, without
+  **[Remote]**. **Circle** keeps it downloading in the background, **Square** cancels.
+  Removing it from a playlist leaves its file on the console: delete it in
+  **Downloads** to have it offered from the server again.
 - **Downloads:** the playlist *Remote* has **Downloads**: each server and whether it
   answered, the download queue (try a failed download again, cancel), and the games
   downloaded, which **Square** twice deletes from the console (their saves stay). The
   queue downloads one game at a time while RetroArch's menu is up, and goes on after
   the title was closed.
 - **Where games go:** the folder in `content/` named after the system (`SNES`, `PS1`,
-  `Saturn`...), else `content/<system>/`, a folder per game with the server's files,
-  so a disc game keeps its `.cue`, `.bin` and `.m3u` together. A downloaded game moves
-  into the system's own playlist at once.
+  `Saturn`...), else `content/<system>/`, as the server keeps them: a game of one file
+  as that file, one of several in a folder of its own, so a disc game keeps its
+  `.cue`, `.bin` and `.m3u` together. A downloaded game moves into the system's own
+  playlist at once.
 - **Written by the console's FTP server:** a title that writes gigabytes itself gets
   slower and slower, while an FTP server on the console (ftpsrv, etaHEN's...), another
   process, keeps its speed. So downloads need one running; without one they fail and

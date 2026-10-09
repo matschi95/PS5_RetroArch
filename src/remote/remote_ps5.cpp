@@ -20,11 +20,11 @@
  * Firmware (src/remote/firmware.h): as a game's core loads, what its info names and its
  * system folder lacks comes from the sources that listed it (ps5_remote_core_opening).
  *
- * The remote core only downloads: once it closed, what it downloaded goes into its system's
+ * Once the remote core downloaded a game, it is started in this RetroArch with its platform's
+ * core, as RetroArch's menu starts a playlist's game (start_game), so nothing restarts the
+ * title under RetroArch's feet. What was downloaded (or deleted) goes into its system's
  * playlist at once (library.h, sync), and RetroArch's menu reads its playlists again; in game
- * mode the frontend goes back to the downloaded game in place of its stub. The game is then
- * started from there as any other, in this RetroArch, so nothing restarts the title under
- * RetroArch's feet.
+ * mode the frontend goes back to the downloaded game in place of its stub.
  */
 #include "remote_core.h"
 
@@ -32,6 +32,7 @@
 #include "../ps5_library.h"
 #include "command.h"
 #include "configuration.h"
+#include "content.h"
 #include "playlist.h"
 #include "files.h"
 #include "library.h"
@@ -51,6 +52,7 @@
 #include <ps5platform/offload.h>
 #include <queues/message_queue.h>
 #include <queues/task_queue.h>
+#include "tasks/task_content.h"
 #ifdef HAVE_MENU
 #include "menu/menu_driver.h"
 #endif
@@ -189,6 +191,40 @@ void fetch_core_firmware(const char *core_path)
     }
 }
 
+/* Runs `then` on RetroArch's main thread, between frames: a task's callback. */
+void on_main_thread(retro_task_callback_t then)
+{
+    retro_task_t *task = task_init();
+    if (!task)
+        return;
+    task->handler = [](retro_task_t *done) { task_set_flags(done, RETRO_TASK_FLG_FINISHED, true); };
+    task->callback = then;
+    if (!task_queue_push(task))
+        std::free(task);
+}
+
+/* A downloaded game RetroArch is to start: its file and its platform's core. */
+std::string starting_content, starting_core;
+
+/* Starts the downloaded game in this RetroArch, as its menu starts a playlist's game while
+ * another one runs: the remote core goes, the game's core comes (its firmware and save data
+ * as for any game, ps5_remote_core_opening and ps5_save_sync_before). */
+void start_game()
+{
+    on_main_thread(
+        [](retro_task_t *, void *, void *, const char *)
+        {
+#ifdef HAVE_MENU
+            content_ctx_info_t info = {};
+            if (task_push_load_content_with_new_core_from_menu(starting_core.c_str(),
+                                                               starting_content.c_str(), &info,
+                                                               CORE_TYPE_PLAIN, nullptr, nullptr))
+                return;
+#endif
+            notice("The game could not be started: " + starting_content, true);
+        });
+}
+
 SaveJobs &save_jobs();
 
 /* The title's services for the remote core's screens. */
@@ -221,19 +257,26 @@ class TitleServices final : public ui::Services
     }
     std::string placed(const std::string &source, const std::string &id) override
     {
-        return placed_folder(source, id);
+        return placed_launch(source, id);
     }
-    bool remove(const Game &game, const std::string &folder, std::string *error) override
+    bool remove(const Game &game, const std::string &launch, std::string *error) override
     {
-        files::remove_tree(folder);
-        if (files::is_folder(folder))
+        const std::string place = placed_path(game.source, game.id);
+        files::remove_tree(place);
+        if (files::is_folder(place) || files::size(place) >= 0)
         {
-            *error = "the folder " + folder + " could not be deleted whole";
+            *error = place + " could not be deleted whole";
             return false;
         }
-        note_removed(Paths::title(), game.platform, folder + "/" + game.file);
+        note_removed(Paths::title(), game.platform, launch);
         forget(game.source, game.id);
         return true;
+    }
+    void play(const std::string &launch, const std::string &core) override
+    {
+        starting_content = launch;
+        starting_core = core;
+        start_game();
     }
     ui::SaveSetup save_setup() override
     {
@@ -347,18 +390,6 @@ TitleServices services;
 std::unique_ptr<ui::Screen> screen;
 Stub open_stub; /* the remote core's, while it is open */
 
-/* Runs `then` on RetroArch's main thread, between frames: a task's callback. */
-void on_main_thread(retro_task_callback_t then)
-{
-    retro_task_t *task = task_init();
-    if (!task)
-        return;
-    task->handler = [](retro_task_t *done) { task_set_flags(done, RETRO_TASK_FLG_FINISHED, true); };
-    task->callback = then;
-    if (!task_queue_push(task))
-        std::free(task);
-}
-
 /* What was downloaded or deleted goes into the playlists now (library.h, sync), and
  * RetroArch's menu reads them again, as after a scan: the playlist shown, and the menu's tabs
  * (a system's playlist may be new). */
@@ -399,15 +430,11 @@ void remote_core_closed(const Stub &stub)
      * the stub stood for, where it is now. */
     sync(Paths::title());
     for (const auto &wanted : stub.games)
-    {
-        Game game;
-        const std::string folder = placed_folder(wanted.first, wanted.second);
-        if (!folder.empty() && find(wanted.first, wanted.second, &game))
+        if (const std::string launch = placed_launch(wanted.first, wanted.second); !launch.empty())
         {
-            ps5_frontend_game_replaced((folder + "/" + game.file).c_str());
+            ps5_frontend_game_replaced(launch.c_str());
             return;
         }
-    }
 }
 
 void start_threads()

@@ -15,6 +15,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <thread>
 
@@ -104,7 +105,10 @@ int main(int argc, char **argv)
          * one): they do not check the download. */
         assert(romm::parse_page(
             "{\"items\":[{\"id\":24,\"name\":\"Super Mario 64\",\"platform_fs_slug\":\"n64\","
-            "\"fs_path\":\"roms/n64\",\"fs_name\":\"SM64.zip\",\"files\":["
+            "\"fs_path\":\"roms/n64\",\"fs_name\":\"SM64.zip\",\"summary\":\"Mario\\nagain\","
+            "\"metadatum\":{\"genres\":[\"Platform\",\"Adventure\"],\"developers\":[],"
+            "\"publishers\":[],\"companies\":[\"Nintendo\"],\"player_count\":\"1\","
+            "\"first_release_date\":899078400000,\"average_rating\":81.72},\"files\":["
             "{\"id\":1,\"file_name\":\"SM64.zip\",\"full_path\":\"roms/n64/SM64.zip\","
             "\"crc_hash\":\"635a2bff\",\"archive_members\":[{\"name\":\"SM64.z64\"}]},"
             "{\"id\":2,\"file_name\":\"b.7Z\",\"crc_hash\":\"11111111\"},"
@@ -114,6 +118,15 @@ int main(int argc, char **argv)
         assert(games.size() == 1 && games[0].files.size() == 3 &&
                games[0].files[0].crc32 == "635a2bff" && games[0].files[0].unpacked &&
                games[0].files[1].unpacked && !games[0].files[2].unpacked);
+        /* Its details: the summary, the metadata RomM gathered (a date in milliseconds, a
+         * rating out of 100), the companies when no developer or publisher is named. */
+        const std::map<std::string, std::string> details = {{"description", "Mario\nagain"},
+                                                            {"developer", "Nintendo"},
+                                                            {"genre", "Platform, Adventure"},
+                                                            {"players", "1"},
+                                                            {"rating", "0.82"},
+                                                            {"released", "1998-06-29"}};
+        assert(games[0].details == details);
         games.clear();
         /* Firmware, each with its platform's names; one gone from the server's drive is not. */
         assert(remote::find_backend("romm")->firmware);
@@ -291,7 +304,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < 5000 && !remote::downloads().empty(); i++)
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     assert(remote::downloads().empty());
-    const std::string folder = remote::placed_folder("home", "11");
+    const std::string folder = remote::placed_path("home", "11"); /* several files */
     assert(folder == root + "/content/psx/Beta Racer");
     std::string track;
     assert(files::read(folder + "/Beta Racer (Track 1).bin", &track) &&

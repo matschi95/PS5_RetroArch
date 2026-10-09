@@ -1611,13 +1611,24 @@ int ps5_library_media(const char *root, const char *system, const char *content_
             folder = types[i][1];
     for (i = 0; i < sizeof(extensions) / sizeof(extensions[0]); ++i)
     {
-        const int n = snprintf(out, size, "%s/%s/%s/%s%s", root, id, folder, key, extensions[i]);
+        const int n = snprintf(out, size, "%s/%s/%s/%s%s%s", root, id, folder,
+                               ps5_library_media_subfolder(content_path), key, extensions[i]);
         if (n > 0 && (size_t)n < size && stat(out, &st) == 0 && S_ISREG(st.st_mode) &&
             st.st_size > 0)
             return 1;
     }
     out[0] = '\0';
     return 0;
+}
+
+const char *ps5_library_media_subfolder(const char *content_path)
+{
+    const char *slash = content_path ? strrchr(content_path, '/') : NULL;
+    const size_t length = strlen(PS5_LIBRARY_STUB_FOLDER);
+    if (!slash || (size_t)(slash - content_path) < length + 1 ||
+        strncmp(slash - length - 1, "/" PS5_LIBRARY_STUB_FOLDER, length + 1) != 0)
+        return "";
+    return PS5_LIBRARY_STUB_FOLDER "/";
 }
 
 int ps5_library_thumbnail(const char *system, const char *content_path, const char *type, char *out,

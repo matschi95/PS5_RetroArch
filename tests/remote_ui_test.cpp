@@ -95,13 +95,17 @@ class SampleServices final : public ui::Services
     }
     std::string placed(const std::string &source, const std::string &id) override
     {
-        return source == "home" && id == placed_id ? "/app0/content/SNES/Chrono Trigger" : "";
+        return source == "home" && id == placed_id ? "/app0/content/SNES/Chrono Trigger.sfc" : "";
     }
     bool remove(const remote::Game &game, const std::string &, std::string *) override
     {
         removed.push_back(game.id);
         placed_id.clear();
         return true;
+    }
+    void play(const std::string &launch, const std::string &core) override
+    {
+        played.push_back(launch + " with " + core);
     }
     ui::SaveSetup save_setup() override
     {
@@ -138,7 +142,7 @@ class SampleServices final : public ui::Services
     remote::Status status_;
     std::vector<remote::Title> titles_;
     std::vector<remote::Download> downloads_;
-    std::vector<std::string> enqueued, cancelled, removed, paired;
+    std::vector<std::string> enqueued, cancelled, removed, played, paired;
     ui::SaveSetup setup;
     remote::PairingRun::View pairing_view;
     std::string placed_id = "71";
@@ -242,8 +246,8 @@ int main(int argc, char **argv)
         screen->input(ui::cross);
         assert(services.enqueued.size() == 2 && !screen->finished());
     }
-    /* Downloaded: said, and the screen ends a moment later (the game is in its system's
-     * list then, started from there); Circle ends it at once. */
+    /* Downloaded: it starts once "Starting the game..." is up (not while it is drawn), once,
+     * with its platform's core. */
     {
         SampleServices services;
         services.placed_id.clear();
@@ -251,18 +255,21 @@ int main(int argc, char **argv)
         assert(services.enqueued.size() == 1);
         services.placed_id = "71";
         screen->input(0);
-        shot(*screen, "14-downloaded");
+        assert(services.played.empty());
+        shot(*screen, "14-starting");
+        assert(services.played.empty());
         screen->input(0);
-        assert(!screen->finished());
-        services.clock += 2.5;
+        assert(services.played.size() == 1 &&
+               services.played[0] ==
+                   "/app0/content/SNES/Chrono Trigger.sfc with /app0/cores/snes9x_libretro.so");
         screen->input(0);
-        assert(screen->finished());
+        assert(services.played.size() == 1 && !screen->finished());
         SampleServices other;
         auto again = ui::open(stub_of({{"home", "71"}}), other); /* downloaded already */
         assert(other.enqueued.empty());
-        shot(*again, "14-downloaded");
-        again->input(ui::circle);
-        assert(again->finished());
+        shot(*again, "14-starting");
+        again->input(0);
+        assert(other.played.size() == 1);
     }
     /* A stub of a game the sources no longer have. */
     {

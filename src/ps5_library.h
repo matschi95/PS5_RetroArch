@@ -55,8 +55,8 @@ extern "C"
 #define PS5_LIBRARY_CORES "/app0/cores"
 #define PS5_LIBRARY_PATH_MAX 1024
 /* The core of a game that is on a download source and not yet here (src/remote/): it
- * fetches the game, which is then started from its system's playlist. It runs no game
- * itself, so it is never a system's core. */
+ * fetches the game, which then starts with its system's core. It runs no game itself, so
+ * it is never a system's core. */
 #define PS5_LIBRARY_FETCH_CORE "remote_libretro.so"
 /* The folder, in a system's folder, of a download source's stubs (src/remote/library.h). */
 #define PS5_LIBRARY_STUB_FOLDER ".remote"
@@ -166,6 +166,10 @@ extern "C"
 #define PS5_LIBRARY_MEDIA "/app0/library"
     /* Writes the key of a content path; 0, or -1 when it does not fit. */
     int ps5_library_media_key(const char *path, char *out, size_t size);
+    /* The folder in each media folder a game's media are in: "" for most, and for a
+     * download source's stub (in PS5_LIBRARY_STUB_FOLDER) that folder, followed by '/',
+     * where EmulationStation looks for a game in a folder of its system's. */
+    const char *ps5_library_media_subfolder(const char *content_path);
     /* The stored file of a game's media: 1 with its path, 0 when there is none. system
      * is anything ps5_library_platform reads (a database, playlist or folder name);
      * folder is the store's ("covers"...) or RetroArch's thumbnail type ("Named_Boxarts",

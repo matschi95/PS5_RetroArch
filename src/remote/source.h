@@ -67,6 +67,10 @@ struct SourceGame
     /* The source's own name for its cover, which changes when the picture does; empty
      * without one. */
     std::string cover;
+    /* What the source says of it, as the media library keeps a game's details (library.h):
+     * "description", "developer", "publisher", "genre", "players", "rating" (0 to 1) and
+     * "released" (1998-06-29); what it does not know is left out. */
+    std::map<std::string, std::string> details;
     std::vector<SourceFile> files; /* its files the console can use */
 };
 

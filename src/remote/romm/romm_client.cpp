@@ -11,6 +11,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
+#include <map>
 #include <random>
 #include <utility>
 
@@ -69,6 +71,54 @@ bool unpacked_hashes(const Json &entry, const std::string &name)
             return true;
     }
     return false;
+}
+
+/* A list of names as one ("Adventure, Platform"). */
+std::string joined(const Json &names)
+{
+    std::string out;
+    for (const Json &name : names.items)
+        if (name.kind == Json::string && !name.text.empty())
+            out += (out.empty() ? "" : ", ") + name.text;
+    return out;
+}
+
+/* What RomM knows of a game (its summary, and the metadata it gathered: RomMetadataSchema),
+ * as the media library keeps a game's details (source.h). */
+std::map<std::string, std::string> details_of(const Json &item)
+{
+    std::map<std::string, std::string> details;
+    const Json &meta = item["metadatum"];
+    const auto set = [&](const char *key, const std::string &value)
+    {
+        if (!value.empty())
+            details[key] = value;
+    };
+    set("description", text(item, "summary"));
+    set("developer", joined(meta["developers"]));
+    set("publisher", joined(meta["publishers"]));
+    if (!details.count("developer") && !details.count("publisher"))
+        set("developer", joined(meta["companies"]));
+    set("genre", joined(meta["genres"]));
+    set("players", text(meta, "player_count"));
+    if (meta["average_rating"].kind == Json::number && meta["average_rating"].value > 0)
+    {
+        char rating[16];
+        std::snprintf(rating, sizeof rating, "%.2f",
+                      std::min(meta["average_rating"].value, 100.0) / 100.0);
+        set("rating", rating);
+    }
+    /* Milliseconds since 1970, as RomM keeps it. */
+    if (meta["first_release_date"].kind == Json::number && meta["first_release_date"].value > 0)
+    {
+        const std::time_t seconds =
+            static_cast<std::time_t>(meta["first_release_date"].value / 1000.0);
+        std::tm day{};
+        char released[16];
+        if (gmtime_r(&seconds, &day) && std::strftime(released, sizeof released, "%Y-%m-%d", &day))
+            set("released", released);
+    }
+    return details;
 }
 
 /* An id as text: a number, or a string that is not empty or "0". */
@@ -561,6 +611,7 @@ bool parse_page(const std::string &text_, std::vector<SourceGame> *games, size_t
         if (!cover.empty() && cover.front() != '/' && cover.rfind("http", 0) != 0)
             cover = "/assets/romm/resources/" + cover;
         game.cover = !cover.empty() ? cover : text(item, "url_cover");
+        game.details = details_of(item);
         games->push_back(std::move(game));
     }
     return true;
