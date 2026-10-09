@@ -71,8 +71,10 @@ bool is_remote_core(const char *path)
 }
 
 /* A download's file written by the console's FTP server: the platform finds the server and
- * the folder it sees content/ as (ps5_offload_setup, once), and a stream sends the bytes
- * there. Cut at the offset first, the file is the title's own: the server appends to it. */
+ * the folder it sees /app0 as (ps5_offload_setup, once), and a stream sends the bytes there.
+ * /app0, not content/: the setup looks one folder deep in the homebrew folders, where the
+ * title's own is (/data/homebrew/PPSA99169), and content/ is one deeper. Cut at the offset
+ * first, the file is the title's own: the server appends to it. */
 class OffloadWriter final : public Writer
 {
   public:
@@ -85,7 +87,7 @@ class OffloadWriter final : public Writer
     {
         static std::once_flag once;
         static bool ready = false;
-        std::call_once(once, [] { ready = ps5_offload_setup("/app0/content", nullptr, 0) == 0; });
+        std::call_once(once, [] { ready = ps5_offload_setup("/app0", nullptr, 0) == 0; });
         if (!ready)
         {
             *error = "Downloads need an FTP server running on the console (ftpsrv, etaHEN's...); "

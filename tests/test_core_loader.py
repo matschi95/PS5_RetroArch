@@ -42,6 +42,10 @@ extern "C" int get_events() { return events; }
 extern "C" void allow_import(bool value) { allow = value; }
 static int native_add(int value) { return value + 40; }
 extern "C" unsigned ps5_core_threads_live() { return 0; }
+static int paused = 0;
+extern "C" void ps5_remote_core_opening(const char *) { ++paused; }
+extern "C" void ps5_remote_core_closed(const char *) { --paused; }
+extern "C" int remote_paused() { return paused; }
 extern "C" void *ps5_core_import(const char *name) {
     if (allow && !std::strcmp(name, "native_add")) return reinterpret_cast<void *>(&native_add);
 #define BIND(symbol) if (!std::strcmp(name, #symbol)) return reinterpret_cast<void *>(&symbol)
@@ -101,6 +105,18 @@ extern "C" void *ps5_core_import(const char *name) {
         handle = self.open(self.core)
         self.assertTrue(handle)
         self.lib.ps5_core_dlclose(handle)
+
+    def test_download_pause_ends_with_a_core_that_does_not_open(self):
+        before = self.lib.remote_paused()
+        self.assertFalse(self.lib.ps5_core_dlopen(b'', 0))
+        self.assertEqual(self.lib.remote_paused(), before)
+        self.assertFalse(self.open(self.folder / 'absent.so'))
+        self.assertEqual(self.lib.remote_paused(), before)
+        handle = self.open(self.core)
+        self.assertTrue(handle)
+        self.assertEqual(self.lib.remote_paused(), before + 1)
+        self.lib.ps5_core_dlclose(handle)
+        self.assertEqual(self.lib.remote_paused(), before)
 
     def test_bad_header_and_header_table_bounds(self):
         self.reject(b'not an ELF', 'file size')

@@ -584,16 +584,19 @@ extern "C" void ps5_remote_core_closed(const char *path) __attribute__((weak));
 
 extern "C" void *ps5_core_dlopen(const char *path, int)
 {
-    if (ps5_remote_core_opening && path)
-        ps5_remote_core_opening(path);
-    pthread_mutex_lock(&mutex);
-    error_text[0] = 0;
     if (!path || !*path || std::strlen(path) >= sizeof(Module::path))
     {
+        pthread_mutex_lock(&mutex);
         fail("invalid core path (no process-global lookup)");
         pthread_mutex_unlock(&mutex);
         return nullptr;
     }
+    /* The sources pause for a core that opens, and go on when it does not after all: no
+     * close would come for it. */
+    if (ps5_remote_core_opening)
+        ps5_remote_core_opening(path);
+    pthread_mutex_lock(&mutex);
+    error_text[0] = 0;
     unsigned count = 0;
     for (auto *m = modules; m; m = m->next)
     {
@@ -624,6 +627,8 @@ extern "C" void *ps5_core_dlopen(const char *path, int)
         }
     }
     pthread_mutex_unlock(&mutex);
+    if (!m && ps5_remote_core_closed)
+        ps5_remote_core_closed(path);
     return m;
 }
 
